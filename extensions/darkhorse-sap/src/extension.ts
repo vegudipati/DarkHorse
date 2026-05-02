@@ -14,6 +14,9 @@ let documentProvider: AbapDocumentProvider;
 
 export async function activate(context: vscode.ExtensionContext) {
 
+  // Initialize credential vault with VS Code secret storage
+  CredentialVault.initialize(context.secrets);
+
   // Initialize providers
   explorerProvider = new SapExplorerProvider();
   documentProvider = new AbapDocumentProvider();

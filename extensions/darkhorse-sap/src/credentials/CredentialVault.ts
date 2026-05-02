@@ -1,49 +1,55 @@
-import * as keytar from 'keytar';
+import * as vscode from 'vscode';
 
-const SERVICE_NAME = 'DarkHorse-SAP';
-
-export interface SapCredentials {
-  username: string;
-  password: string;
-}
-
+/**
+ * CredentialVault uses VS Code's built-in SecretStorage API.
+ * On Windows, this is backed by Windows Credential Manager (DPAPI).
+ * No native modules required. No plaintext storage.
+ */
 export class CredentialVault {
 
-  /**
-   * Store SAP credentials in Windows Credential Manager.
-   * Credentials are encrypted via Windows DPAPI — never stored in plaintext.
-   */
-  public static async store(systemId: string, username: string, password: string): Promise<void> {
-    const key = `${systemId}:${username}`;
-    await keytar.setPassword(SERVICE_NAME, key, password);
-  }
+  private static secrets: vscode.SecretStorage | undefined;
 
   /**
-   * Retrieve credentials for a system. Returns null if not found.
+   * Must be called once during extension activation with context.secrets
    */
-  public static async retrieve(systemId: string, username: string): Promise<SapCredentials | null> {
-    const key = `${systemId}:${username}`;
-    const password = await keytar.getPassword(SERVICE_NAME, key);
+  public static initialize(secrets: vscode.SecretStorage): void {
+    CredentialVault.secrets = secrets;
+  }
+
+  public static async store(systemId: string, username: string, password: string): Promise<void> {
+    if (!CredentialVault.secrets) {
+      throw new Error('CredentialVault not initialized');
+    }
+    const key = `darkhorse-sap:${systemId}:${username}`;
+    await CredentialVault.secrets.store(key, password);
+  }
+
+  public static async retrieve(systemId: string, username: string): Promise<{ username: string; password: string } | null> {
+    if (!CredentialVault.secrets) {
+      throw new Error('CredentialVault not initialized');
+    }
+    const key = `darkhorse-sap:${systemId}:${username}`;
+    const password = await CredentialVault.secrets.get(key);
     if (!password) {
       return null;
     }
     return { username, password };
   }
 
-  /**
-   * Delete credentials for a system from Windows Credential Manager.
-   */
   public static async delete(systemId: string, username: string): Promise<void> {
-    const key = `${systemId}:${username}`;
-    await keytar.deletePassword(SERVICE_NAME, key);
+    if (!CredentialVault.secrets) {
+      throw new Error('CredentialVault not initialized');
+    }
+    const key = `darkhorse-sap:${systemId}:${username}`;
+    await CredentialVault.secrets.delete(key);
   }
 
-  /**
-   * Check if credentials exist for a system without retrieving the password.
-   */
   public static async exists(systemId: string, username: string): Promise<boolean> {
-    const key = `${systemId}:${username}`;
-    const password = await keytar.getPassword(SERVICE_NAME, key);
-    return password !== null;
+    if (!CredentialVault.secrets) {
+      return false;
+    }
+    const key = `darkhorse-sap:${systemId}:${username}`;
+    const password = await CredentialVault.secrets.get(key);
+    return password !== undefined;
   }
 }
