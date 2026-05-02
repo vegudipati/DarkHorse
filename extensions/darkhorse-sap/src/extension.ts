@@ -6,11 +6,17 @@ import { LandscapeManager, SapSystem } from './landscape/LandscapeManager';
 import { SapExplorerProvider } from './explorer/SapExplorerProvider';
 import { AbapDocumentProvider } from './providers/AbapDocumentProvider';
 import { SapObjectItem } from './explorer/SapObjectItem';
+import { AddSystemPanel } from './landscape/AddSystemPanel';
+import { TransportClient } from './transport/TransportClient';
+import { TransportProvider } from './transport/TransportProvider';
+import { registerTransportCommands } from './commands/transportCommands';
 
 let session: AdtSession = new AdtSession();
 let client: AdtClient | undefined;
 let explorerProvider: SapExplorerProvider;
 let documentProvider: AbapDocumentProvider;
+let transportClient: TransportClient | undefined;
+let transportProvider: TransportProvider;
 
 export async function activate(context: vscode.ExtensionContext) {
 
@@ -20,6 +26,17 @@ export async function activate(context: vscode.ExtensionContext) {
   // Initialize providers
   explorerProvider = new SapExplorerProvider();
   documentProvider = new AbapDocumentProvider();
+
+  // Initialize transport provider
+  transportProvider = new TransportProvider();
+  vscode.window.registerTreeDataProvider('darkhorse.transportView', transportProvider);
+
+  // Register transport commands
+  registerTransportCommands(
+    context,
+    () => transportClient,
+    transportProvider
+  );
 
   // Register SAP Explorer tree view
   vscode.window.registerTreeDataProvider('darkhorse.sapExplorer', explorerProvider);
@@ -52,6 +69,8 @@ export async function activate(context: vscode.ExtensionContext) {
       client = undefined;
       documentProvider.clearClient();
       explorerProvider.clearConnection();
+      transportClient = undefined;
+      transportProvider.clearClient();
       vscode.window.showInformationMessage('DarkHorse: Disconnected from SAP.');
     })
   );
@@ -81,50 +100,23 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 async function addSystemWizard(): Promise<void> {
-  const id = await vscode.window.showInputBox({
-    prompt: 'System ID (short name, e.g. S4D)',
-    placeHolder: 'S4D',
-    validateInput: v => v && v.length > 0 ? null : 'System ID is required'
-  });
-  if (!id) { return; }
+  const data = await AddSystemPanel.show();
+  if (!data) { return; }
 
-  const name = await vscode.window.showInputBox({
-    prompt: 'Display Name (e.g. S/4HANA DEV)',
-    placeHolder: 'S/4HANA DEV'
-  });
-  if (!name) { return; }
+  const system: SapSystem = {
+    id: data.id,
+    name: data.name,
+    host: data.host,
+    client: data.client,
+    username: data.username,
+    language: data.language
+  };
 
-  const host = await vscode.window.showInputBox({
-    prompt: 'SAP Host — hostname, IP, or full URL (e.g. sap-dev.company.com or https://sap-dev.company.com:44300)',
-    placeHolder: 'sap-dev.company.com',
-    validateInput: v => v && v.length > 0 ? null : 'Host is required'
-  });
-  if (!host) { return; }
-
-  const client = await vscode.window.showInputBox({
-    prompt: 'SAP Client (e.g. 100)',
-    placeHolder: '100',
-    value: '100'
-  });
-  if (!client) { return; }
-
-  const username = await vscode.window.showInputBox({
-    prompt: 'SAP Username',
-    placeHolder: 'your-sap-user'
-  });
-  if (!username) { return; }
-
-  const password = await vscode.window.showInputBox({
-    prompt: 'SAP Password (stored in Windows Credential Manager)',
-    password: true
-  });
-  if (!password) { return; }
-
-  const system: SapSystem = { id, name, host, client, username, language: 'EN' };
   await LandscapeManager.addSystem(system);
-  await CredentialVault.store(id, username, password);
-
-  vscode.window.showInformationMessage(`DarkHorse: SAP System "${name}" added successfully.`);
+  await CredentialVault.store(data.id, data.username, data.password);
+  vscode.window.showInformationMessage(
+    `DarkHorse: SAP System "${data.name}" (${data.id}) added successfully.`
+  );
 }
 
 async function connectToSystem(): Promise<void> {
@@ -167,6 +159,8 @@ async function connectToSystem(): Promise<void> {
       await LandscapeManager.setActiveSystem(system.id);
       documentProvider.setClient(client);
       explorerProvider.setConnection(client, session, system.id);
+      transportClient = new TransportClient(system, session, client);
+      transportProvider.setClient(transportClient);
       vscode.window.showInformationMessage(
         `DarkHorse: Connected to ${system.name} (${system.id}) as ${system.username}`
       );

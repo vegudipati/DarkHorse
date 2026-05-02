@@ -21,6 +21,11 @@
           "id": "darkhorse-sap-explorer",
           "title": "DarkHorse SAP",
           "icon": "resources/sap-icon.svg"
+        },
+        {
+          "id": "darkhorse.transportManager",
+          "title": "DarkHorse Transports",
+          "icon": "resources/sap-icon.svg"
         }
       ]
     },
@@ -34,6 +39,12 @@
         {
           "id": "darkhorse.systemLandscape",
           "name": "System Landscape"
+        }
+      ],
+      "darkhorse.transportManager": [
+        {
+          "id": "darkhorse.transportView",
+          "name": "Transport Manager"
         }
       ]
     },
@@ -62,6 +73,20 @@
       {
         "command": "darkhorse.sap.openObject",
         "title": "DarkHorse SAP: Open ABAP Object"
+      },
+      {
+        "command": "darkhorse.transport.create",
+        "title": "DarkHorse: Create Transport Request",
+        "icon": "$(add)"
+      },
+      {
+        "command": "darkhorse.transport.refresh",
+        "title": "DarkHorse: Refresh Transports",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "darkhorse.transport.assignObject",
+        "title": "DarkHorse: Assign to Transport"
       }
     ],
     "menus": {

@@ -168,6 +168,15 @@ export class AdtClient {
     return this.parseSearchResults(response.body);
   }
 
+  public async rawRequest(options: {
+    url: string;
+    method: string;
+    headers?: Record<string, string>;
+    body?: string;
+    }): Promise<{ statusCode: number; headers: Record<string, string | string[] | undefined>; body: string }> {
+      return this.request(options);
+  }
+
   // ─── Private helpers ────────────────────────────────────────────
 
   private async authenticatedRequest(options: RequestOptions): Promise<ResponseData> {
