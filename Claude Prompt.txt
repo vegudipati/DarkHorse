@@ -1,0 +1,31 @@
+Hi! 
+As of today, there is no robust code editor like Cursor, VSCode to develop solutions (RICEFWs) for SAP S/4HANA and other SAP Products. We generally use Eclipse IDE, but we use this as an alternative for not having an editor. There are SAP Build Application Studio, but it still not a friendly editor like VS Code, Cursor. And in Eclipse, as of now, I do not have the option to leverage AI-Agents for development. 
+
+My objective is to build a Robust Editor for building SAP Solutions and I need your help. 
+
+Objective for Claude: You objective is to build a VS Code fork for SAP Solutions RICEFW Development, and we are going to name it as "DarkHorse".
+So, here is what I would like you to do.
+
+Step 1: Understand the objectives I set for you (Claude) and I. 
+Ask me questions to deepen your understanding of the objective.
+Ask me questions to understand any gaps you have that you don't know why I am trying to do this.
+Do not assume anything.
+
+Step 2: Develop a high level architecture of how this tool will function. MOST IMPORTANT: SECURITY IS A TOP PRIORITY. BUILD THE SOLUTION WITH SECURITY IN THE CENTER. 
+
+Step 3: Break this architecture to logical build packages/files for you to begin the build and make it into 7 MVP build packages and 3 CPI once we complete this MVP build. 
+
+Step 4: Do not over plan. Instead my recommendation is to plan it as follows 
+a) Create a VS Code fork to build "Dark Horse" to be compatible with Windows operating system. 
+b) Ability to connect to SAP S4HANA and ability to write ABAP Code. 
+c) Ability to verify ABAP syntax and show syntax errors
+d) Ability to create a SAP Transport from Dark Horse
+e) Integrate with LLMs and use AI to generate ABAP code using prompts
+f) Save the code into the Transport
+g) Ability to Connect to GIT Hub and commit the code, Pull a branch and other GIT functionalities
+h) Ability to create new agents from Dark Horse to do multiple tasks. Agent Creation should be a questionnaire for the user and once the questionnaire populated, Dark Horse with the help from LLMs and Agents (Claude and others) to generate an Agents.
+i) Ability to spin up agents in real time and complete tasks and scale them down. 
+h) Once all done, then plan other integrations 
+
+Do not build the editor yet. Review, Understand, Ask questions, develop the details docs on what to build and how to build, and then we proceed to build.
+
