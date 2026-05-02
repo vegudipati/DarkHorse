@@ -1,0 +1,67 @@
+{
+  "name": "darkhorse-core",
+  "displayName": "DarkHorse",
+  "description": "DarkHorse — SAP S/4HANA ABAP Development IDE",
+  "version": "0.1.0",
+  "publisher": "deloitte-darkhorse",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "darkhorse.welcome",
+        "title": "DarkHorse: Open Welcome"
+      },
+      {
+        "command": "darkhorse.about",
+        "title": "DarkHorse: About"
+      }
+    ],
+    "configuration": {
+      "title": "DarkHorse",
+      "properties": {
+        "darkhorse.telemetry.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "DarkHorse telemetry is always disabled. This setting is locked to false."
+        },
+        "darkhorse.general.developerName": {
+          "type": "string",
+          "default": "",
+          "description": "Your name — used in generated FDS/TDS document headers."
+        },
+        "darkhorse.general.workspaceFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Local folder path where ABAP source files and documents are saved."
+        }
+      }
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "darkhorse.welcome"
+        },
+        {
+          "command": "darkhorse.about"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "lint": "eslint src"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^6.0.3"
+  }
+}
