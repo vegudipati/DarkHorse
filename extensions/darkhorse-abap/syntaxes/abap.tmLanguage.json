@@ -1,0 +1,105 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "ABAP",
+  "scopeName": "source.abap",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#operators" },
+    { "include": "#numbers" },
+    { "include": "#variables" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.abap",
+          "match": "^\\*.*$"
+        },
+        {
+          "name": "comment.line.quote.abap",
+          "match": "\".*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.abap",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "name": "constant.character.escape.abap", "match": "''" }
+          ]
+        },
+        {
+          "name": "string.quoted.backtick.abap",
+          "begin": "`",
+          "end": "`"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.abap",
+          "match": "(?i)\\b(IF|ELSE|ELSEIF|ENDIF|CASE|WHEN|ENDCASE|DO|ENDDO|WHILE|ENDWHILE|LOOP|ENDLOOP|AT|ENDAT|SELECT|ENDSELECT|EXIT|CONTINUE|RETURN|RAISE|TRY|CATCH|CLEANUP|ENDTRY|CHECK|STOP|REJECT|LEAVE|CALL|PERFORM|SUBMIT|TRANSFER|ROLLBACK|COMMIT)\\b"
+        },
+        {
+          "name": "keyword.declaration.abap",
+          "match": "(?i)\\b(DATA|TYPES|CONSTANTS|PARAMETERS|SELECT-OPTIONS|TABLES|FIELD-SYMBOLS|CLASS-DATA|CLASS-METHODS|METHODS|ALIASES|EVENTS|INTERFACES|INCLUDE|REPORT|PROGRAM|FUNCTION-POOL|CLASS|ENDCLASS|INTERFACE|ENDINTERFACE|FORM|ENDFORM|FUNCTION|ENDFUNCTION|MODULE|ENDMODULE|METHOD|ENDMETHOD|DEFINE|END-OF-DEFINITION|ENHANCEMENT|ENDENHANCEMENT|ENHANCEMENT-SECTION|END-ENHANCEMENT-SECTION)\\b"
+        },
+        {
+          "name": "keyword.operator.abap",
+          "match": "(?i)\\b(MOVE|COMPUTE|ADD|SUBTRACT|MULTIPLY|DIVIDE|CONCATENATE|SPLIT|CONDENSE|TRANSLATE|REPLACE|SEARCH|FIND|CLEAR|REFRESH|FREE|APPEND|COLLECT|INSERT|MODIFY|DELETE|READ|SORT|DESCRIBE|ASSIGN|UNASSIGN|GET|SET|OPEN|CLOSE|WRITE|NEW-LINE|SKIP|ULINE|POSITION|FORMAT|HIDE|RESERVE|WINDOW|SCROLL|BACK|TOP-OF-PAGE|END-OF-PAGE|INITIALIZATION|START-OF-SELECTION|END-OF-SELECTION|AT SELECTION-SCREEN|AT LINE-SELECTION|AT USER-COMMAND)\\b"
+        },
+        {
+          "name": "keyword.other.abap",
+          "match": "(?i)\\b(INTO|FROM|WHERE|HAVING|GROUP BY|ORDER BY|FOR ALL ENTRIES|UP TO|ROWS|BYPASSING BUFFER|CLIENT SPECIFIED|INNER JOIN|LEFT OUTER JOIN|ON|AS|LIKE|TYPE|VALUE|INITIAL|IS|NOT|NULL|INITIAL|BOUND|SUPPLIED|REQUESTED|AND|OR|EQ|NE|LT|GT|LE|GE|BETWEEN|IN|TABLE|STANDARD|SORTED|HASHED|WITH|KEY|UNIQUE|NON-UNIQUE|TRANSPORTING|COMPARING|OF|TO|BY|USING|CHANGING|EXPORTING|IMPORTING|RECEIVING|EXCEPTIONS|RAISING|REDEFINITION|ABSTRACT|FINAL|PUBLIC|PROTECTED|PRIVATE|STATIC|READ-ONLY|OPTIONAL|PREFERRED|DEFAULT|CASTING|RANGE|OCCURS|STRUCTURE|OBJECT|REFERENCE|RETURNING|CLASS-POOL|INTERFACE-POOL)\\b"
+        },
+        {
+          "name": "support.function.abap",
+          "match": "(?i)\\b(STRLEN|NUMOFCHAR|CHARLEN|XSTRLEN|LINES|KEYS|ABS|SIGN|CEIL|FLOOR|TRUNC|FRAC|SIN|COS|TAN|ASIN|ACOS|ATAN|SQRT|LOG|LOG2|LOG10|EXP|ROUND|RESCALE|IPOW|NMIN|NMAX|CMIN|CMAX|BOOLC|BOOLX|XSDBOOL|CONTAINS|CONTAINS_ANY_OF|CONTAINS_ANY_NOT_OF|MATCHES|LINE_EXISTS|LINE_INDEX|FIND_END|COUNT|COUNT_ANY_OF|COUNT_ANY_NOT_OF|DISTANCE|SUBSTRING|SUBSTRING_AFTER|SUBSTRING_BEFORE|SUBSTRING_FROM|SUBSTRING_TO|TO_UPPER|TO_LOWER|TO_MIXED|SHIFT_LEFT|SHIFT_RIGHT|REVERSE|CONDENSE|CONCAT_LINES_OF|REPEAT|ESCAPE|CONV|CAST|REF|EXACT|CORRESPONDING|VALUE|REDUCE|FILTER|NEW|SWITCH|COND)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.abap",
+          "match": "(?i)\\b(C|N|D|T|X|I|INT8|F|P|STRING|XSTRING|DECFLOAT16|DECFLOAT34|REF TO|TYPE REF TO|LIKE REF TO|LIKE LINE OF|LIKE TABLE OF)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.abap",
+          "match": "(?i)\\b(EQ|NE|LT|GT|LE|GE|CO|CN|CA|NA|CS|NS|CP|NP)\\b|[=<>]|<>|<=|>="
+        },
+        {
+          "name": "keyword.operator.arithmetic.abap",
+          "match": "[+\\-*/]"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.abap",
+          "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.abap",
+          "match": "<[A-Za-z_][A-Za-z0-9_]*>"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "darkhorse-abap",
+  "displayName": "DarkHorse ABAP Language Support",
+  "description": "ABAP syntax highlighting, snippets, and ADT-powered syntax checking for DarkHorse",
+  "version": "0.1.0",
+  "publisher": "deloitte-darkhorse",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:abap"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "abap",
+        "aliases": ["ABAP", "abap"],
+        "extensions": [".abap"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "abap",
+        "scopeName": "source.abap",
+        "path": "./syntaxes/abap.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "abap",
+        "path": "./snippets/abap.code-snippets"
+      }
+    ],
+    "commands": [
+      {
+        "command": "darkhorse.abap.checkSyntax",
+        "title": "DarkHorse ABAP: Check Syntax"
+      }
+    ],
+    "configuration": {
+      "title": "DarkHorse ABAP",
+      "properties": {
+        "darkhorse.abap.syntaxCheckOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run ADT syntax check automatically on file save"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^6.0.3"
+  }
+}

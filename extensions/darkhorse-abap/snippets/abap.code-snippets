@@ -1,0 +1,236 @@
+{
+  "SELECT Single": {
+    "prefix": "selsin",
+    "body": [
+      "SELECT SINGLE ${1:fields}",
+      "  FROM ${2:table}",
+      "  INTO ${3:target}",
+      "  WHERE ${4:condition}.",
+      "",
+      "IF sy-subrc <> 0.",
+      "  $5",
+      "ENDIF."
+    ],
+    "description": "SELECT SINGLE statement"
+  },
+  "SELECT Into Table": {
+    "prefix": "sel",
+    "body": [
+      "SELECT ${1:fields}",
+      "  FROM ${2:table}",
+      "  INTO TABLE ${3:lt_result}",
+      "  WHERE ${4:condition}.",
+      "",
+      "IF sy-subrc <> 0.",
+      "  $5",
+      "ENDIF."
+    ],
+    "description": "SELECT INTO TABLE statement"
+  },
+  "LOOP AT": {
+    "prefix": "loop",
+    "body": [
+      "LOOP AT ${1:lt_table} INTO ${2:ls_line}.",
+      "  $3",
+      "ENDLOOP."
+    ],
+    "description": "LOOP AT internal table"
+  },
+  "LOOP AT ASSIGNING": {
+    "prefix": "loopa",
+    "body": [
+      "LOOP AT ${1:lt_table} ASSIGNING FIELD-SYMBOL(<${2:ls_line}>).",
+      "  $3",
+      "ENDLOOP."
+    ],
+    "description": "LOOP AT with ASSIGNING FIELD-SYMBOL"
+  },
+  "IF Statement": {
+    "prefix": "if",
+    "body": [
+      "IF ${1:condition}.",
+      "  $2",
+      "ENDIF."
+    ],
+    "description": "IF statement"
+  },
+  "IF ELSE": {
+    "prefix": "ife",
+    "body": [
+      "IF ${1:condition}.",
+      "  $2",
+      "ELSE.",
+      "  $3",
+      "ENDIF."
+    ],
+    "description": "IF ELSE statement"
+  },
+  "CASE Statement": {
+    "prefix": "case",
+    "body": [
+      "CASE ${1:variable}.",
+      "  WHEN ${2:value1}.",
+      "    $3",
+      "  WHEN ${4:value2}.",
+      "    $5",
+      "  WHEN OTHERS.",
+      "    $6",
+      "ENDCASE."
+    ],
+    "description": "CASE statement"
+  },
+  "TRY CATCH": {
+    "prefix": "try",
+    "body": [
+      "TRY.",
+      "  $1",
+      "CATCH ${2:cx_root} INTO ${3:lx_error}.",
+      "  $4",
+      "ENDTRY."
+    ],
+    "description": "TRY CATCH block"
+  },
+  "DATA Declaration": {
+    "prefix": "data",
+    "body": [
+      "DATA: ${1:lv_variable} TYPE ${2:string}."
+    ],
+    "description": "DATA declaration"
+  },
+  "DATA Table": {
+    "prefix": "datat",
+    "body": [
+      "DATA: ${1:lt_table} TYPE TABLE OF ${2:type}.",
+      "DATA: ${3:ls_line}  TYPE ${2:type}."
+    ],
+    "description": "DATA internal table and work area"
+  },
+  "CLASS Definition": {
+    "prefix": "class",
+    "body": [
+      "CLASS ${1:lcl_name} DEFINITION.",
+      "  PUBLIC SECTION.",
+      "    METHODS: ${2:method_name}.",
+      "  PRIVATE SECTION.",
+      "    DATA: ${3:mv_attribute} TYPE ${4:string}.",
+      "ENDCLASS.",
+      "",
+      "CLASS ${1:lcl_name} IMPLEMENTATION.",
+      "  METHOD ${2:method_name}.",
+      "    $5",
+      "  ENDMETHOD.",
+      "ENDCLASS."
+    ],
+    "description": "CLASS definition and implementation"
+  },
+  "METHOD": {
+    "prefix": "meth",
+    "body": [
+      "METHOD ${1:method_name}.",
+      "  $2",
+      "ENDMETHOD."
+    ],
+    "description": "METHOD block"
+  },
+  "FORM": {
+    "prefix": "form",
+    "body": [
+      "FORM ${1:form_name}",
+      "  USING    ${2:pv_input}    TYPE ${3:string}",
+      "  CHANGING ${4:pv_output}   TYPE ${5:string}.",
+      "",
+      "  $6",
+      "",
+      "ENDFORM."
+    ],
+    "description": "FORM subroutine"
+  },
+  "CALL FUNCTION": {
+    "prefix": "cf",
+    "body": [
+      "CALL FUNCTION '${1:FUNCTION_NAME}'",
+      "  EXPORTING",
+      "    ${2:param} = ${3:value}",
+      "  IMPORTING",
+      "    ${4:param} = ${5:variable}",
+      "  EXCEPTIONS",
+      "    OTHERS    = 1.",
+      "",
+      "IF sy-subrc <> 0.",
+      "  $6",
+      "ENDIF."
+    ],
+    "description": "CALL FUNCTION statement"
+  },
+  "CALL METHOD": {
+    "prefix": "cm",
+    "body": [
+      "${1:lo_object}->${2:method_name}(",
+      "  EXPORTING",
+      "    ${3:param} = ${4:value}",
+      "  RECEIVING",
+      "    ${5:result} = ${6:lv_result}",
+      ")."
+    ],
+    "description": "CALL METHOD (object oriented)"
+  },
+  "READ TABLE": {
+    "prefix": "read",
+    "body": [
+      "READ TABLE ${1:lt_table} INTO ${2:ls_line}",
+      "  WITH KEY ${3:field} = ${4:value}.",
+      "",
+      "IF sy-subrc <> 0.",
+      "  $5",
+      "ENDIF."
+    ],
+    "description": "READ TABLE statement"
+  },
+  "MODIFY TABLE": {
+    "prefix": "mod",
+    "body": [
+      "MODIFY ${1:lt_table} FROM ${2:ls_line}.",
+      "IF sy-subrc <> 0.",
+      "  $3",
+      "ENDIF."
+    ],
+    "description": "MODIFY internal table"
+  },
+  "DELETE TABLE": {
+    "prefix": "del",
+    "body": [
+      "DELETE ${1:lt_table} WHERE ${2:field} = ${3:value}.",
+      "IF sy-subrc <> 0.",
+      "  $4",
+      "ENDIF."
+    ],
+    "description": "DELETE from internal table"
+  },
+  "APPEND": {
+    "prefix": "app",
+    "body": [
+      "APPEND ${1:ls_line} TO ${2:lt_table}.",
+      "CLEAR ${1:ls_line}."
+    ],
+    "description": "APPEND to internal table"
+  },
+  "MESSAGE": {
+    "prefix": "msg",
+    "body": [
+      "MESSAGE ${1:e}${2:001}(${3:ZMessageClass}) WITH ${4:lv_var}."
+    ],
+    "description": "MESSAGE statement"
+  },
+  "AUTHORITY CHECK": {
+    "prefix": "auth",
+    "body": [
+      "AUTHORITY-CHECK OBJECT '${1:S_TCODE}'",
+      "  ID 'TCD' FIELD '${2:tcode}'.",
+      "",
+      "IF sy-subrc <> 0.",
+      "  MESSAGE e003(${3:ZMsgClass}).",
+      "ENDIF."
+    ],
+    "description": "AUTHORITY-CHECK statement"
+  }
+}
