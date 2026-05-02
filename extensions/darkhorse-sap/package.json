@@ -1,0 +1,101 @@
+{
+  "name": "darkhorse-sap",
+  "displayName": "DarkHorse SAP Connector",
+  "description": "SAP S/4HANA ADT connection, object browser, and source read/write for DarkHorse",
+  "version": "0.1.0",
+  "publisher": "deloitte-darkhorse",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "darkhorse-sap-explorer",
+          "title": "DarkHorse SAP",
+          "icon": "resources/sap-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "darkhorse-sap-explorer": [
+        {
+          "id": "darkhorse.sapExplorer",
+          "name": "SAP Explorer",
+          "icon": "resources/sap-icon.svg"
+        },
+        {
+          "id": "darkhorse.systemLandscape",
+          "name": "System Landscape"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "darkhorse.sap.connect",
+        "title": "DarkHorse SAP: Connect to System"
+      },
+      {
+        "command": "darkhorse.sap.disconnect",
+        "title": "DarkHorse SAP: Disconnect"
+      },
+      {
+        "command": "darkhorse.sap.addSystem",
+        "title": "DarkHorse SAP: Add SAP System"
+      },
+      {
+        "command": "darkhorse.sap.removeSystem",
+        "title": "DarkHorse SAP: Remove SAP System"
+      },
+      {
+        "command": "darkhorse.sap.refreshExplorer",
+        "title": "DarkHorse SAP: Refresh Explorer",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "darkhorse.sap.openObject",
+        "title": "DarkHorse SAP: Open ABAP Object"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "darkhorse.sap.refreshExplorer",
+          "when": "view == darkhorse.sapExplorer",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DarkHorse SAP",
+      "properties": {
+        "darkhorse.sap.systems": {
+          "type": "array",
+          "default": [],
+          "description": "List of configured SAP systems (stored without credentials)"
+        },
+        "darkhorse.sap.activeSystem": {
+          "type": "string",
+          "default": "",
+          "description": "Currently active SAP system ID"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
+  },
+  "dependencies": {
+    "keytar": "^7.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^6.0.3"
+  }
+}
