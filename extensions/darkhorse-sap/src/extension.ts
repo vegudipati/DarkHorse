@@ -95,9 +95,9 @@ async function addSystemWizard(): Promise<void> {
   if (!name) { return; }
 
   const host = await vscode.window.showInputBox({
-    prompt: 'SAP Host URL (e.g. https://sap-dev.company.com:44300)',
-    placeHolder: 'https://your-sap-host:44300',
-    validateInput: v => v && v.startsWith('http') ? null : 'Must start with https://'
+    prompt: 'SAP Host — hostname, IP, or full URL (e.g. sap-dev.company.com or https://sap-dev.company.com:44300)',
+    placeHolder: 'sap-dev.company.com',
+    validateInput: v => v && v.length > 0 ? null : 'Host is required'
   });
   if (!host) { return; }
 

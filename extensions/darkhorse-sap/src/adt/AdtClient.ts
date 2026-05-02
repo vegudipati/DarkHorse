@@ -28,12 +28,21 @@ export class AdtClient {
     this.session = session;
   }
 
+  private getBaseUrl(): string {
+    return this.system.host.startsWith('http')
+      ? this.system.host
+      : `https://${this.system.host}`;
+  }
+
   /**
    * Authenticate with SAP and fetch CSRF token.
    * Token and cookies stored in memory via AdtSession.
    */
   public async authenticate(password: string): Promise<void> {
-    const url = `${this.system.host}/sap/bc/adt/core/discovery`;
+    const baseUrl = this.system.host.startsWith('http') 
+      ? this.system.host 
+      : `https://${this.system.host}`;
+    const url = `${baseUrl}/sap/bc/adt/core/discovery`;
     const credentials = Buffer.from(`${this.system.username}:${password}`).toString('base64');
 
     const response = await this.request({
