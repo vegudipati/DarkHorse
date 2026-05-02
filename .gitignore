@@ -1,0 +1,21 @@
+# Node modules — never commit these
+node_modules/
+**/node_modules/
+
+# Compiled output
+out/
+**/out/
+
+# Packaged extensions
+*.vsix
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# VS Code local settings
+.vscode/settings.json
+.vscode/launch.json
