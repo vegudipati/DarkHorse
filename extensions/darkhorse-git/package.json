@@ -1,0 +1,64 @@
+{
+  "name": "darkhorse-git",
+  "displayName": "DarkHorse Git",
+  "description": "SAP ABAP Git integration for DarkHorse IDE",
+  "version": "0.6.0",
+  "private": true,
+  "engines": { "vscode": "^1.85.0" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "views": {
+      "scm": [
+        {
+          "id":   "darkhorse.gitPanel",
+          "name": "ABAP Git",
+          "when": "true"
+        }
+      ]
+    },
+    "commands": [
+      { "command": "darkhorse.git.setCredentials", "title": "DarkHorse Git: Set GitHub Credentials" },
+      { "command": "darkhorse.git.openRepo",       "title": "DarkHorse Git: Open Client Repo" },
+      { "command": "darkhorse.git.cloneRepo",      "title": "DarkHorse Git: Clone Repository" },
+      { "command": "darkhorse.git.exportAndStage", "title": "DarkHorse Git: Export & Stage Active File" },
+      { "command": "darkhorse.git.stageAll",       "title": "DarkHorse Git: Stage All Changes" },
+      { "command": "darkhorse.git.commit",         "title": "DarkHorse Git: Commit" },
+      { "command": "darkhorse.git.push",           "title": "DarkHorse Git: Push" },
+      { "command": "darkhorse.git.pull",           "title": "DarkHorse Git: Pull" },
+      { "command": "darkhorse.git.newBranch",      "title": "DarkHorse Git: New Branch" },
+      { "command": "darkhorse.git.switchBranch",   "title": "DarkHorse Git: Switch Branch" },
+      { "command": "darkhorse.git.refresh",        "title": "DarkHorse Git: Refresh", "icon": "$(refresh)" }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "darkhorse.git.refresh",
+          "when":    "view == darkhorse.gitPanel",
+          "group":   "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "darkhorse.git.exportAndStage",
+          "when":    "editorLangId == abap",
+          "group":   "darkhorse"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build":   "tsc --project tsconfig.json",
+    "clean":   "rimraf dist",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
+  },
+  "dependencies": {
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "@types/node":   "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "rimraf":        "^6.0.1",
+    "typescript":    "^5.7.2"
+  }
+}

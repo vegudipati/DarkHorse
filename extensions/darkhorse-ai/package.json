@@ -1,0 +1,62 @@
+{
+  "name": "darkhorse-ai",
+  "displayName": "DarkHorse AI",
+  "description": "AI-powered ABAP code generation for DarkHorse IDE",
+  "version": "0.5.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "darkhorse.openAiPanel",
+        "title": "DarkHorse: Open AI Panel",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "darkhorse.setApiKey",
+        "title": "DarkHorse: Set API Key"
+      },
+      {
+        "command": "darkhorse.showAuditLog",
+        "title": "DarkHorse: Show AI Audit Log"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "darkhorse.openAiPanel",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "darkhorse.openAiPanel",
+          "when": "editorLangId == abap",
+          "group": "darkhorse"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build":       "tsc --project tsconfig.json",
+    "build:watch": "tsc --project tsconfig.json --watch",
+    "clean":       "rimraf dist",
+    "package":     "vsce package --no-dependencies --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node":   "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "rimraf":        "^6.0.1",
+    "typescript":    "^5.7.2"
+  },
+  "notes": {
+    "no-native-modules": "No native npm modules. Credentials via VS Code SecretStorage only.",
+    "proxy-path": "ProxyManager resolves proxy at ../../services/llm-proxy/dist/index.js from extensionPath"
+  }
+}

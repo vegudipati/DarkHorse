@@ -1,0 +1,1 @@
+{"version":3,"file":"AbapSystemPrompt.d.ts","sourceRoot":"","sources":["../AbapSystemPrompt.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;GAYG;AAIH,qBAAa,gBAAgB;IAM3B,MAAM,CAAC,QAAQ,CAAC,QAAQ,g8EAkCuC;IAM/D,MAAM,CAAC,QAAQ,CAAC,MAAM,swDAoCoD;IAM1E,MAAM,CAAC,QAAQ,CAAC,OAAO,s1BAUkE;IAMzF;;;OAGG;IACH,MAAM,CAAC,GAAG,CAAC,SAAS,GAAE,UAAU,GAAG,QAAQ,GAAG,SAAsB,GAAG,MAAM;CAO9E"}

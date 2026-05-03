@@ -1,0 +1,41 @@
+{
+  "name": "darkhorse-agents",
+  "displayName": "DarkHorse Agents",
+  "description": "AI agent orchestration for DarkHorse IDE",
+  "version": "0.7.0",
+  "private": true,
+  "engines": { "vscode": "^1.85.0" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "darkhorse.newAgent",
+        "title":   "DarkHorse: New Agent",
+        "icon":    "$(robot)"
+      },
+      {
+        "command": "darkhorse.openAgentDashboard",
+        "title":   "DarkHorse: Open Agent Dashboard"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "darkhorse.newAgent",
+        "key":     "ctrl+shift+g",
+        "mac":     "cmd+shift+g"
+      }
+    ]
+  },
+  "scripts": {
+    "build":   "tsc --project tsconfig.json",
+    "clean":   "rimraf dist",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node":   "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "rimraf":        "^6.0.1",
+    "typescript":    "^5.7.2"
+  }
+}

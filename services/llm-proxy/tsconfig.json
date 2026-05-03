@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target":            "ES2022",
+    "module":            "Node16",
+    "moduleResolution":  "Node16",
+    "lib":               ["ES2022"],
+    "outDir":            "./dist",
+    "rootDir":           "./",
+    "strict":            true,
+    "esModuleInterop":   true,
+    "skipLibCheck":      true,
+    "resolveJsonModule": true,
+    "declaration":       true,
+    "declarationMap":    true,
+    "sourceMap":         true,
+
+    // Node 24 has native fetch — no polyfill needed
+    // "lib" does not include DOM so fetch types come from @types/node
+    "types": ["node"]
+  },
+  "include": [
+    "index.ts",
+    "types.ts",
+    "PiiScrubber.ts",
+    "RateLimiter.ts",
+    "AuditLogger.ts",
+    "AbapSystemPrompt.ts",
+    "adapters/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts"
+  ]
+}

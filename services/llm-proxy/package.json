@@ -1,0 +1,37 @@
+{
+  "name": "darkhorse-llm-proxy",
+  "version": "0.5.0",
+  "description": "DarkHorse local LLM proxy service — localhost-only AI gateway",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build":       "tsc --project tsconfig.json",
+    "build:watch": "tsc --project tsconfig.json --watch",
+    "clean":       "rimraf dist",
+    "rebuild":     "npm run clean && npm run build",
+    "test":        "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express":  "^4.17.21",
+    "@types/node":     "^22.0.0",
+    "rimraf":          "^6.0.1",
+    "typescript":      "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "notes": {
+    "no-native-modules": "This package deliberately contains NO native npm modules. All storage uses VS Code SecretStorage (extension side) or flat files (proxy side). SQLite (better-sqlite3) and keytar will be added in CPI-1 once native module compilation is resolved.",
+    "api-key-security": "DARKHORSE_CLAUDE_API_KEY is passed via process.env at spawn time. It is NEVER written to disk, logged, or included in error messages. Upgrade to IPC key delivery in CPI-1.",
+    "cpi1-upgrades": [
+      "Replace env-var API key with IPC callback to parent extension",
+      "Replace .jsonl audit log with SQLite (better-sqlite3)",
+      "Replace local proxy with Azure API Management / AWS API Gateway",
+      "Add per-user rate limiting",
+      "Add response streaming"
+    ]
+  }
+}
