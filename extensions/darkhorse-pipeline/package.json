@@ -1,0 +1,90 @@
+{
+  "name": "darkhorse-pipeline",
+  "displayName": "DarkHorse Pipeline",
+  "description": "BR → FDS → TDS → Code pipeline for SAP RICEFW development",
+  "version": "0.1.0",
+  "publisher": "deloitte-darkhorse",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "darkhorse-pipeline",
+          "title": "DarkHorse Pipeline",
+          "icon": "resources/pipeline-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "darkhorse-pipeline": [
+        {
+          "id": "darkhorse.pipelineTracker",
+          "name": "Pipeline Status"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "darkhorse.pipeline.start",
+        "title": "DarkHorse: Start BR → FDS → TDS → Code Pipeline"
+      },
+      {
+        "command": "darkhorse.pipeline.loadReferenceDocs",
+        "title": "DarkHorse: Load Reference Documents for This Project"
+      },
+      {
+        "command": "darkhorse.pipeline.resumePipeline",
+        "title": "DarkHorse: Resume Pipeline"
+      },
+      {
+        "command": "darkhorse.pipeline.clearPipeline",
+        "title": "DarkHorse: Clear Current Pipeline"
+      }
+    ],
+    "configuration": {
+      "title": "DarkHorse Pipeline",
+      "properties": {
+        "darkhorse.pipeline.outputFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Local folder where FDS and TDS .docx files are saved"
+        },
+        "darkhorse.pipeline.referenceDocsFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Folder containing existing FDS/TDS documents for style reference"
+        },
+        "darkhorse.pipeline.defaultPackage": {
+          "type": "string",
+          "default": "",
+          "description": "Default SAP package for generated objects"
+        },
+        "darkhorse.pipeline.llmProxyPort": {
+          "type": "number",
+          "default": 3100,
+          "description": "Port of the DarkHorse LLM proxy (from MVP-5)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
+  },
+  "dependencies": {
+    "docx": "^8.5.0",
+    "mammoth": "^1.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^6.0.3"
+  }
+}
