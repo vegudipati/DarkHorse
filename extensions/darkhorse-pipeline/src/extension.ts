@@ -21,6 +21,14 @@ export function activate(context: vscode.ExtensionContext) {
       await BrIntakePanel.show(context, stateManager, tracker);
     })
   );
+  
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.resetCodeGen', async () => {
+      await stateManager.resetCodeGeneration();
+      tracker.refresh();
+      vscode.window.showInformationMessage('DarkHorse: Code generation reset. Use Resume Pipeline to retry.');
+    })
+  );
 
   // Command: Load reference documents
   context.subscriptions.push(

@@ -48,6 +48,10 @@
       {
         "command": "darkhorse.pipeline.clearPipeline",
         "title": "DarkHorse: Clear Current Pipeline"
+      },
+      {
+        "command": "darkhorse.pipeline.resetCodeGen",
+        "title": "DarkHorse: Reset Code Generation"
       }
     ],
     "configuration": {

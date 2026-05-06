@@ -152,6 +152,19 @@ export class PipelineStateManager {
     await this.setState(state);
   }
 
+  public async resetCodeGeneration(): Promise<void> {
+    const state = this.getState();
+    if (!state) { return; }
+    state.currentObjectIndex = 0;
+    state.currentStage = 'tds_approved';
+    state.abapObjects = state.abapObjects.map(obj => ({
+      ...obj,
+      codeGenerated: false,
+      codeAccepted: false
+    }));
+    await this.setState(state);
+  }
+
   public getStageSummary(): string {
     const state = this.getState();
     if (!state) { return 'No active pipeline'; }
