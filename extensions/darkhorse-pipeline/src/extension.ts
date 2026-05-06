@@ -15,22 +15,24 @@ export function activate(context: vscode.ExtensionContext) {
   vscode.window.registerTreeDataProvider('darkhorse.pipelineTracker', tracker);
 
   // Command: Start new pipeline
-  // BrIntakePanel added in Phase 2
   context.subscriptions.push(
     vscode.commands.registerCommand('darkhorse.pipeline.start', async () => {
-      vscode.window.showInformationMessage(
-        'DarkHorse Pipeline: BR Intake coming in Phase 2.'
-      );
+      const { BrIntakePanel } = require('./BrIntakePanel');
+      await BrIntakePanel.show(context, stateManager, tracker);
     })
   );
 
   // Command: Load reference documents
-  // ReferenceDocLoader added in Phase 2
   context.subscriptions.push(
     vscode.commands.registerCommand('darkhorse.pipeline.loadReferenceDocs', async () => {
-      vscode.window.showInformationMessage(
-        'DarkHorse Pipeline: Reference Doc Loader coming in Phase 2.'
-      );
+      const { ReferenceDocLoader } = require('./ReferenceDocLoader');
+      const styleContext = await ReferenceDocLoader.loadAndConfigure(context, stateManager);
+      if (styleContext) {
+        tracker.refresh();
+        vscode.window.showInformationMessage(
+          `DarkHorse: ${styleContext.documentCount} reference document(s) loaded successfully.`
+        );
+      }
     })
   );
 

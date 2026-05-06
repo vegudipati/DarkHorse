@@ -80,12 +80,15 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
     ));
 
     // Stage 1: BR
+// Stage 1: BR
+    const brStatus = stage === 'br_captured' ? 'active' : 
+                    this.isAfter(stage, 'br_captured') ? 'complete' : 'pending';
     items.push(new PipelineItem(
       'Business Requirement',
-      this.getStageStatus(stage, 'br_captured'),
-      this.getStageStatus(stage, 'br_captured') === 'complete' ? 'Captured' : 'Pending'
+      brStatus,
+      brStatus === 'complete' ? 'Captured ✓' : 
+      brStatus === 'active' ? 'Captured — Awaiting FDS' : 'Pending'
     ));
-
     // Stage 2: FDS
     const fdsStatus = this.getStageStatus(stage, 'fds_approved');
     items.push(new PipelineItem(
