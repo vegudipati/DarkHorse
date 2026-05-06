@@ -68,7 +68,7 @@ const fs = __importStar(require("fs"));
 // Secret storage key — must match the key used in DarkHorse Settings
 const SECRET_KEY_CLAUDE = 'darkhorse.claudeApiKey';
 const PROXY_READY_SIGNAL = '[DarkHorse Proxy] Ready on';
-const PROXY_STARTUP_TIMEOUT_MS = 15_000; // 15 seconds to start
+const PROXY_STARTUP_TIMEOUT_MS = 45_000; // 15 seconds to start
 const PROXY_PORT = 47291;
 class ProxyManager {
     proxyProcess = null;
@@ -104,7 +104,12 @@ class ProxyManager {
      * Stop the proxy process gracefully.
      * Called on extension deactivation.
      */
+    startupTimeout = null;
     async stop() {
+        if (this.startupTimeout) {
+            clearTimeout(this.startupTimeout);
+            this.startupTimeout = null;
+        }
         if (!this.proxyProcess) {
             return;
         }
@@ -163,15 +168,27 @@ class ProxyManager {
         return this.context.secrets.get(SECRET_KEY_CLAUDE);
     }
     resolveProxyScript() {
-        // The compiled proxy lives at services/llm-proxy/dist/index.js
-        // relative to the extension's root directory
         const extensionRoot = this.context.extensionPath;
-        const proxyPath = path.join(extensionRoot, '..', '..', 'services', 'llm-proxy', 'dist', 'index.js');
-        if (!fs.existsSync(proxyPath)) {
-            throw new Error(`LLM Proxy script not found at: ${proxyPath}\n` +
-                'Run "npm run build" in services/llm-proxy to compile the proxy.');
+        // Try 1: Inside installed extension (production)
+        const installedPath = path.join(extensionRoot, 'services', 'llm-proxy', 'dist', 'index.js');
+        if (fs.existsSync(installedPath)) {
+            return installedPath;
         }
-        return proxyPath;
+        // Try 2: Dev folder relative to extension (development)
+        const devPath = path.join(extensionRoot, '..', '..', 'services', 'llm-proxy', 'dist', 'index.js');
+        if (fs.existsSync(devPath)) {
+            return devPath;
+        }
+        // Try 3: Absolute dev path fallback
+        const absolutePath = 'C:\\99-AI Projects\\DarkHorse\\services\\llm-proxy\\dist\\index.js';
+        if (fs.existsSync(absolutePath)) {
+            return absolutePath;
+        }
+        throw new Error(`LLM Proxy script not found. Tried:\n` +
+            `  1. ${installedPath}\n` +
+            `  2. ${devPath}\n` +
+            `  3. ${absolutePath}\n` +
+            'Run "npm run build" in services/llm-proxy to compile the proxy.');
     }
     spawnProxy(scriptPath, apiKey) {
         return new Promise((resolve, reject) => {
@@ -192,10 +209,11 @@ class ProxyManager {
                 // stdout: pipe    — we read the ready signal and forward to output channel
                 // stderr: pipe    — we forward errors to output channel
             });
-            const timeoutHandle = setTimeout(() => {
+            this.startupTimeout = setTimeout(() => {
                 reject(new Error(`LLM Proxy failed to start within ${PROXY_STARTUP_TIMEOUT_MS / 1000} seconds.`));
                 this.proxyProcess?.kill();
             }, PROXY_STARTUP_TIMEOUT_MS);
+            const timeoutHandle = this.startupTimeout;
             // Watch stdout for the ready signal line
             this.proxyProcess.stdout.on('data', (data) => {
                 const text = data.toString();

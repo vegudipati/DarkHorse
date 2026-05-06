@@ -41,6 +41,7 @@ export declare class ProxyManager implements vscode.Disposable {
      * Stop the proxy process gracefully.
      * Called on extension deactivation.
      */
+    private startupTimeout;
     stop(): Promise<void>;
     /**
      * Returns the base URL for the proxy, e.g. 'http://127.0.0.1:47291'.

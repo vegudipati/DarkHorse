@@ -74,6 +74,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // Restart the proxy with the new key
       if (proxyManager) {
         await proxyManager.stop();
+        // Wait 1.5s for OS to release the port before restarting
+        await new Promise<void>(resolve => setTimeout(resolve, 4500));
         try {
           await proxyManager.start();
           vscode.window.showInformationMessage('DarkHorse AI: Proxy restarted successfully.');
