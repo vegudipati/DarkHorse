@@ -46,10 +46,39 @@ export function activate(context: vscode.ExtensionContext) {
         );
         return;
       }
-      vscode.window.showInformationMessage(
-        `DarkHorse: Resuming pipeline "${state.title}" at stage: ${state.currentStage}`
-      );
+
       tracker.refresh();
+
+      // Resume at the correct stage
+      if (state.currentStage === 'fds_review' && state.fdsContent && state.fdsFilePath) {
+        const { FdsReviewPanel } = require('./FdsReviewPanel');
+        const fdsDoc = JSON.parse(state.fdsContent);
+        await FdsReviewPanel.show(context, fdsDoc, state.fdsFilePath, stateManager, tracker);
+
+      } else if (state.currentStage === 'tds_review' && state.tdsContent && state.tdsFilePath) {
+        const { TdsReviewPanel } = require('./TdsReviewPanel');
+        const tdsDoc = JSON.parse(state.tdsContent);
+        await TdsReviewPanel.show(context, tdsDoc, state.tdsFilePath, stateManager, tracker);
+
+      } else if (state.currentStage === 'fds_approved') {
+        vscode.window.showInformationMessage(
+          'DarkHorse: FDS approved. Generating TDS...'
+        );
+        const { TdsGenerator } = require('./TdsGenerator');
+        await TdsGenerator.generate(context, stateManager, tracker);
+
+      } else if (state.currentStage === 'tds_approved' || state.currentStage === 'code_generating') {
+        vscode.window.showInformationMessage(
+          'DarkHorse: Resuming code generation...'
+        );
+        const { ObjectCodeGenerator } = require('./ObjectCodeGenerator');
+        await ObjectCodeGenerator.generate(context, stateManager, tracker);
+
+      } else {
+        vscode.window.showInformationMessage(
+          `DarkHorse: Pipeline "${state.title}" is at stage: ${state.currentStage}`
+        );
+      }
     })
   );
 

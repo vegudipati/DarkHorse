@@ -138,25 +138,40 @@ Return ONLY this JSON structure, no other text:
 }`;
 
     try {
-      const response = await fetch(`http://127.0.0.1:${proxyPort}/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          systemPrompt: 'You are a document style analyst. Return only valid JSON. No markdown, no explanation.',
-          maxTokens: 500
-        })
+      const http = require('http');
+      const payload = JSON.stringify({
+        prompt,
+        systemPrompt: 'You are a document style analyst. Return only valid JSON. No markdown, no explanation.',
+        maxTokens: 500
       });
 
-      if (!response.ok) {
-        throw new Error(`Proxy error: ${response.status}`);
-      }
+      const rawContent = await new Promise<string>((resolve, reject) => {
+        const options = {
+          hostname: '127.0.0.1',
+          port: proxyPort,
+          path: '/generate',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload)
+          }
+        };
+        const req = http.request(options, (res: any) => {
+          let data = '';
+          res.on('data', (chunk: any) => data += chunk);
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(data);
+              resolve(parsed.code ?? parsed.content ?? '');
+            } catch { resolve(data); }
+          });
+        });
+        req.on('error', (err: any) => reject(err));
+        req.write(payload);
+        req.end();
+      });
 
-      const data = await response.json() as { content?: string; error?: string };
-      const content = data.content ?? '';
-
-      // Clean and parse JSON response
-      const cleaned = content.replace(/```json|```/g, '').trim();
+      const cleaned = rawContent.replace(/```json|```/g, '').trim();
       const parsed = JSON.parse(cleaned);
 
       return {

@@ -138,14 +138,16 @@ export class BrIntakePanel {
     vscode.window.showInformationMessage(
       `DarkHorse: Pipeline started for "${data.title}". Generating FDS...`
     );
-
     // Dynamically import FdsGenerator — built in Phase 3
-// FdsGenerator added in Phase 3
-    vscode.window.showInformationMessage(
-      `DarkHorse: BR captured for "${data.title}". FDS Generator coming in Phase 3.`
-    );
-    this.tracker.refresh();
+// Trigger FDS generation
+  this.tracker.refresh();
+  try {
+    const { FdsGenerator } = require('./FdsGenerator');
+    await FdsGenerator.generate(this.context, this.stateManager, this.tracker);
+  } catch (err: any) {
+    vscode.window.showErrorMessage(`DarkHorse: FDS generation failed — ${err.message}`);
   }
+}
 
   private getHtml(
     defaultPackage: string,
