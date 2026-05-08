@@ -45,8 +45,16 @@ export class ObjectCodeGenerator {
         return;
       }
 
+      // Mark complete BEFORE showing any further UI
       await stateManager.markObjectComplete(i, accepted);
+      await stateManager.setState(stateManager.getState()!);
       tracker.refresh();
+
+      vscode.window.showInformationMessage(
+        accepted
+          ? `DarkHorse: ${obj.objectName} accepted ✓`
+          : `DarkHorse: ${obj.objectName} rejected — skipping.`
+      );
     }
 
     // All objects complete
@@ -111,7 +119,7 @@ export class ObjectCodeGenerator {
       .trim();
 
     // Step 2 — Show preview panel and wait for accept/reject
-    const accepted = await ObjectCodeGenerator.showDiffPreview(obj, generatedCode);
+    const accepted = await ObjectCodeGenerator.showDiffPreview(obj, generatedCode, stateManager);
     return accepted;
   }
 
@@ -121,7 +129,8 @@ export class ObjectCodeGenerator {
    */
   private static async showDiffPreview(
     obj: AbapObject,
-    generatedCode: string
+    generatedCode: string,
+    stateManager: PipelineStateManager
   ): Promise<boolean> {
 
     return new Promise(async (resolve) => {
@@ -142,15 +151,59 @@ export class ObjectCodeGenerator {
 
       let resolved = false;
 
-      panel.webview.onDidReceiveMessage((message) => {
+      panel.webview.onDidReceiveMessage(async (message) => {
         if (message.command === 'accept') {
           resolved = true;
-          vscode.env.clipboard.writeText(generatedCode);
-          vscode.window.showInformationMessage(
-            `DarkHorse: ${obj.objectName} code copied to clipboard. ` +
-            'Paste into SAP ADT or DarkHorse ABAP editor.'
-          );
+
+          // Copy to clipboard first
+          await vscode.env.clipboard.writeText(generatedCode);
+
+          // Save state immediately before any other async operations
+          const currentState = stateManager.getState();
+          if (currentState) {
+            const objIndex = currentState.abapObjects.findIndex(
+              o => o.objectName === obj.objectName
+            );
+            if (objIndex >= 0) {
+              currentState.abapObjects[objIndex].codeGenerated = true;
+              currentState.abapObjects[objIndex].codeAccepted = true;
+              currentState.currentObjectIndex = objIndex + 1;
+              if (currentState.currentObjectIndex >= currentState.abapObjects.length) {
+                currentState.currentStage = 'complete';
+              }
+              await stateManager.setState(currentState);
+            }
+          }
+
           panel.dispose();
+
+          // Save to .abap file and offer Git commit
+          const config = vscode.workspace.getConfiguration();
+          const outputFolder = config.get<string>('darkhorse.pipeline.outputFolder', '');
+          if (outputFolder) {
+            try {
+              const { PipelineGitHelper } = require('./PipelineGitHelper');
+              const filePath = await PipelineGitHelper.saveCodeToFile(
+                obj.objectName,
+                obj.objectType,
+                generatedCode,
+                outputFolder
+              );
+              vscode.window.showInformationMessage(
+                `DarkHorse: ${obj.objectName} ✓ Saved to ${filePath}`
+              );
+              setTimeout(async () => {
+                try {
+                  await PipelineGitHelper.commitCode(filePath, obj.objectName, stateManager);
+                } catch { }
+              }, 1000);
+            } catch {
+              vscode.window.showInformationMessage(
+                `DarkHorse: ${obj.objectName} code copied to clipboard.`
+              );
+            }
+          }
+
           resolve(true);
         } else if (message.command === 'reject') {
           resolved = true;

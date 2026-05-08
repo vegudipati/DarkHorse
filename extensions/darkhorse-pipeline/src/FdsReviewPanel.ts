@@ -79,14 +79,25 @@ export class FdsReviewPanel {
     this.panel.webview.html = this.getHtml();
   }
 
-  private async handleApprove(): Promise<void> {
+ private async handleApprove(): Promise<void> {
     await this.stateManager.markFdsApproved();
     this.tracker.refresh();
     this.panel.dispose();
 
+    // Start TDS generation immediately — don't wait for Git
     vscode.window.showInformationMessage(
-      `DarkHorse: FDS approved. Generating Technical Design Specification...`
+      'DarkHorse: FDS approved. Generating Technical Design Specification...'
     );
+
+    // Git commit runs in background — non-blocking
+    setTimeout(async () => {
+      try {
+        const { PipelineGitHelper } = require('./PipelineGitHelper');
+        await PipelineGitHelper.commitFds(this.stateManager);
+      } catch {
+        // Git commit is optional
+      }
+    }, 2000);
 
     // Move to TDS generation
     try {

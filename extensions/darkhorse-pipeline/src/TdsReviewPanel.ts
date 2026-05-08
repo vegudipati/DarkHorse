@@ -105,6 +105,16 @@ export class TdsReviewPanel {
       'DarkHorse: TDS approved. Starting code generation...'
     );
 
+    // Git commit runs in background — non-blocking
+    setTimeout(async () => {
+      try {
+        const { PipelineGitHelper } = require('./PipelineGitHelper');
+        await PipelineGitHelper.commitTds(this.stateManager);
+      } catch {
+        // Git commit is optional
+      }
+    }, 2000);
+
     try {
       const { ObjectCodeGenerator } = require('./ObjectCodeGenerator');
       await ObjectCodeGenerator.generate(this.context, this.stateManager, this.tracker);
