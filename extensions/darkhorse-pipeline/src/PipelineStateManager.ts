@@ -3,6 +3,9 @@ import * as vscode from 'vscode';
 export type PipelineStage =
   | 'idle'
   | 'br_captured'
+  | 'solution_overview_generating'
+  | 'solution_overview_review'
+  | 'solution_overview_approved'
   | 'fds_generating'
   | 'fds_review'
   | 'fds_approved'
@@ -10,7 +13,38 @@ export type PipelineStage =
   | 'tds_review'
   | 'tds_approved'
   | 'code_generating'
-  | 'complete';
+  | 'complete'
+  | 'blocked_level_d';
+
+export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D' | 'mixed';
+
+export interface CleanCoreComponent {
+  component: string;
+  approach: string;
+  level: CleanCoreLevel;
+  reasoning: string;
+}
+
+export interface SolutionOverview {
+  solutionSummary: string;
+  solutionDetails: string;
+  affectedModules: string[];
+  complexity: 'Low' | 'Medium' | 'High';
+  level2Architecture: {
+    description: string;
+    systems: Array<{ name: string; role: string }>;
+    flows: Array<{ from: string; to: string; protocol: string; description: string }>;
+    triggerPoint: string;
+  };
+  level3Architecture: {
+    description: string;
+    components: Array<{ name: string; type: string; detail: string }>;
+  };
+  cleanCoreAlignment: CleanCoreComponent[];
+  overallCleanCoreLevel: CleanCoreLevel;
+  deviations: Array<{ component: string; level: CleanCoreLevel; risk: string }>;
+  errorHandlingApproach: string;
+}
 
 export interface AbapObject {
   sequence: number;
@@ -30,20 +64,28 @@ export interface PipelineState {
   sapPackage: string;
   brText: string;
   currentStage: PipelineStage;
+  // Solution Overview
+  solutionOverview?: SolutionOverview;
+  cleanCoreLevelJustification?: string;
+  hasLevelDViolation: boolean;
+  levelDViolationDetails?: string;
+  // FDS/TDS
   fdsFilePath?: string;
   tdsFilePath?: string;
-  fdsContent?: string;        // JSON string of FdsDocument
-  tdsContent?: string;        // JSON string of TdsDocument
+  fdsContent?: string;
+  tdsContent?: string;
+  // Code generation
   abapObjects: AbapObject[];
   currentObjectIndex: number;
+  // Metadata
   startedAt: string;
   lastUpdatedAt: string;
   referenceDocsLoaded: boolean;
-  styleContext?: string;      // JSON string of StyleContext
+  styleContext?: string;
 }
 
-const STATE_KEY = 'darkhorse.pipeline.state';
-const STYLE_KEY = 'darkhorse.pipeline.styleContext';
+const STATE_KEY  = 'darkhorse.pipeline.state';
+const STYLE_KEY  = 'darkhorse.pipeline.styleContext';
 
 export class PipelineStateManager {
 
@@ -80,11 +122,7 @@ export class PipelineStateManager {
   public getStyleContext(): object | undefined {
     const raw = this.context.globalState.get<string>(STYLE_KEY);
     if (!raw) { return undefined; }
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return undefined;
-    }
+    try { return JSON.parse(raw); } catch { return undefined; }
   }
 
   public async initPipeline(
@@ -101,12 +139,56 @@ export class PipelineStateManager {
       sapPackage,
       brText,
       currentStage: 'br_captured',
+      hasLevelDViolation: false,
       abapObjects: [],
       currentObjectIndex: 0,
       startedAt: new Date().toISOString(),
       lastUpdatedAt: new Date().toISOString(),
       referenceDocsLoaded: this.getStyleContext() !== undefined
     };
+    await this.setState(state);
+  }
+
+  public async markSolutionOverviewGenerated(overview: SolutionOverview): Promise<void> {
+    const state = this.getState();
+    if (!state) { return; }
+    state.solutionOverview = overview;
+    state.hasLevelDViolation = overview.overallCleanCoreLevel === 'D' ||
+      overview.deviations.some(d => d.level === 'D');
+    state.levelDViolationDetails = state.hasLevelDViolation
+      ? overview.deviations.filter(d => d.level === 'D').map(d => d.component).join(', ')
+      : undefined;
+    state.currentStage = 'solution_overview_review';
+    await this.setState(state);
+  }
+
+  public async markSolutionOverviewApproved(justification?: string): Promise<void> {
+    const state = this.getState();
+    if (!state) { return; }
+    state.currentStage = 'solution_overview_approved';
+    if (justification) {
+      state.cleanCoreLevelJustification = justification;
+    }
+    await this.setState(state);
+  }
+
+  public async blockForLevelD(): Promise<void> {
+    const state = this.getState();
+    if (!state) { return; }
+    state.currentStage = 'blocked_level_d';
+    state.hasLevelDViolation = true;
+    await this.setState(state);
+  }
+
+  public async refineBrForLevelD(newBrText: string): Promise<void> {
+    const state = this.getState();
+    if (!state) { return; }
+    state.brText = newBrText;
+    state.currentStage = 'br_captured';
+    state.hasLevelDViolation = false;
+    state.levelDViolationDetails = undefined;
+    state.solutionOverview = undefined;
+    state.cleanCoreLevelJustification = undefined;
     await this.setState(state);
   }
 
@@ -144,11 +226,9 @@ export class PipelineStateManager {
     state.abapObjects[index].codeGenerated = true;
     state.abapObjects[index].codeAccepted = accepted;
     state.currentObjectIndex = index + 1;
-    if (state.currentObjectIndex >= state.abapObjects.length) {
-      state.currentStage = 'complete';
-    } else {
-      state.currentStage = 'code_generating';
-    }
+    state.currentStage = state.currentObjectIndex >= state.abapObjects.length
+      ? 'complete'
+      : 'code_generating';
     await this.setState(state);
   }
 
@@ -158,9 +238,7 @@ export class PipelineStateManager {
     state.currentObjectIndex = 0;
     state.currentStage = 'tds_approved';
     state.abapObjects = state.abapObjects.map(obj => ({
-      ...obj,
-      codeGenerated: false,
-      codeAccepted: false
+      ...obj, codeGenerated: false, codeAccepted: false
     }));
     await this.setState(state);
   }
@@ -168,9 +246,12 @@ export class PipelineStateManager {
   public getStageSummary(): string {
     const state = this.getState();
     if (!state) { return 'No active pipeline'; }
-    const stageLabels: Record<PipelineStage, string> = {
+    const labels: Record<PipelineStage, string> = {
       idle: 'Idle',
       br_captured: 'BR Captured',
+      solution_overview_generating: 'Generating Solution Overview...',
+      solution_overview_review: 'Solution Overview Under Review',
+      solution_overview_approved: 'Solution Overview Approved',
       fds_generating: 'Generating FDS...',
       fds_review: 'FDS Under Review',
       fds_approved: 'FDS Approved',
@@ -178,8 +259,9 @@ export class PipelineStateManager {
       tds_review: 'TDS Under Review',
       tds_approved: 'TDS Approved',
       code_generating: `Generating Code (${state.currentObjectIndex}/${state.abapObjects.length})`,
-      complete: 'Pipeline Complete'
+      complete: 'Pipeline Complete',
+      blocked_level_d: '🚫 BLOCKED — Level D Violation'
     };
-    return stageLabels[state.currentStage];
+    return labels[state.currentStage];
   }
 }

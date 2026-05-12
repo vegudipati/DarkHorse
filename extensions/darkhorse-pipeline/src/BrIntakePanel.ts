@@ -70,10 +70,22 @@ export class BrIntakePanel {
         case 'pickOutputFolder':
           await this.pickOutputFolder();
           break;
-        case 'loadReferenceDocs':
-          await vscode.commands.executeCommand('darkhorse.pipeline.loadReferenceDocs');
-          this.panel.dispose();
+        case 'loadReferenceDocs': {
+          const { ReferenceDocLoader } = require('./ReferenceDocLoader');
+          const styleContext = await ReferenceDocLoader.loadAndConfigure(context, stateManager);
+          if (styleContext) {
+            // Update the panel to show docs loaded — don't dispose
+            this.panel.webview.postMessage({
+              command: 'referenceDocsLoaded',
+              count: styleContext.documentCount,
+              files: styleContext.loadedFiles
+            });
+            vscode.window.showInformationMessage(
+              `DarkHorse: ${styleContext.documentCount} reference document(s) loaded.`
+            );
+          }
           break;
+        }
       }
     });
 
@@ -140,12 +152,13 @@ export class BrIntakePanel {
     );
     // Dynamically import FdsGenerator — built in Phase 3
 // Trigger FDS generation
+  // Trigger Solution Overview generation
   this.tracker.refresh();
   try {
-    const { FdsGenerator } = require('./FdsGenerator');
-    await FdsGenerator.generate(this.context, this.stateManager, this.tracker);
+    const { SolutionOverviewGenerator } = require('./SolutionOverviewGenerator');
+    await SolutionOverviewGenerator.generate(this.context, this.stateManager, this.tracker);
   } catch (err: any) {
-    vscode.window.showErrorMessage(`DarkHorse: FDS generation failed — ${err.message}`);
+    vscode.window.showErrorMessage(`DarkHorse: Solution Overview generation failed — ${err.message}`);
   }
 }
 
@@ -427,6 +440,15 @@ As a Finance user, I need a custom ABAP report (ZFIN_OPEN_ITEMS) that displays o
       if (msg.command === 'error') {
         const err = document.getElementById('err-' + msg.field);
         if (err) { err.textContent = msg.message; err.style.display = 'block'; }
+      }
+      if (msg.command === 'referenceDocsLoaded') {
+        const note = document.querySelector('.ref-docs-status');
+        if (note) {
+          note.style.background = '#1a2d1a';
+          note.style.border = '1px solid #238636';
+          note.style.color = '#3fb950';
+          note.innerHTML = '<span>✅ Reference documents loaded (' + msg.count + ' docs): ' + msg.files.join(', ') + '</span>';
+        }
       }
     });
 

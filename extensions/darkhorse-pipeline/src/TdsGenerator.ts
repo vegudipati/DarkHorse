@@ -35,6 +35,8 @@ export class TdsGenerator {
     }
 
     const fdsDoc = JSON.parse(state.fdsContent) as FdsDocument;
+    const solutionOverview = state.solutionOverview;
+
     const styleContextObj = stateManager.getStyleContext() as any;
     const styleContext = styleContextObj
       ? ReferenceDocLoader.formatStyleContext(styleContextObj)
@@ -55,7 +57,7 @@ export class TdsGenerator {
           sessionId: `tds-${Date.now()}`
         });
 
-        const tdsDoc = TdsGenerator.parseResponse(rawContent, state, fdsDoc);
+        const tdsDoc = TdsGenerator.parseResponse(rawContent, state, fdsDoc, solutionOverview);
 
         // Extract ABAP objects from TDS
         const abapObjects: AbapObject[] = tdsDoc.sections.abapObjectList.map(obj => ({
@@ -90,86 +92,116 @@ export class TdsGenerator {
     });
   }
 
-  private static buildPrompt(
+private static buildPrompt(
     fds: FdsDocument,
     ricefwType: string,
     styleContext: string
   ): string {
+
     const frList = fds.sections.functionalRequirements
-      .map(fr => `${fr.id}: ${fr.description}`)
+      .map(fr => `${fr.id} [${fr.priority}]: ${fr.description}`)
       .join('\n');
 
-    return `Generate a complete Technical Design Specification for this SAP ${ricefwType} development.
+    // Truncate to stay within 8000 char proxy limit
+    const bgSummary = fds.sections.businessBackground.substring(0, 300);
+    const frSummary = frList.length > 1500 ? frList.substring(0, 1500) + '...' : frList;
+    const rulesSummary = fds.sections.businessRules.slice(0, 5).join('\n');
+    const authSummary = fds.sections.authorization.substring(0, 200);
 
-Approved Functional Design Specification:
+    return `Generate a detailed Technical Design Specification for this SAP ${ricefwType} development.
+
+APPROVED FDS SUMMARY:
 Title: ${fds.title}
 RICEFW Type: ${fds.ricefwType}
 
 Business Background:
-${fds.sections.businessBackground}
+${bgSummary}
 
 Functional Requirements:
-${frList}
+${frSummary}
 
-Business Rules:
-${fds.sections.businessRules.join('\n')}
+Key Business Rules:
+${rulesSummary}
 
 Authorization:
-${fds.sections.authorization}
+${authSummary}
 
 Style Guide:
-${styleContext}
+${styleContext.substring(0, 300)}
 
-Return ONLY a valid JSON object. No markdown, no explanation:
+CRITICAL REQUIREMENTS:
+1. technicalApproach: 2-3 paragraphs, architecture approach, ABAP design patterns, key decisions
+2. designDecisions: minimum 5 specific technical decisions with rationale
+3. abapObjectList: each object needs 8-10 keyLogic steps as pseudocode with SAP table/field refs, all dependencies
+4. dataDictionary: every SAP table used, key fields, any custom tables with field definitions
+5. programLogic: pseudocode with SAP API calls, FM names, BAdI names
+6. dbDesign: SELECT strategies, indexes, performance for data volumes
+7. errorHandling: SY-SUBRC checks, SLG1 application log, message class and numbers
+8. testScenarios: minimum 5 with exact input values and expected SY-SUBRC
+
+Return ONLY valid JSON. No markdown. No explanation:
 {
   "sections": {
-    "technicalApproach": "string - overall technical approach and architecture",
-    "designDecisions": ["decision 1", "decision 2"],
+    "technicalApproach": "string",
+    "designDecisions": ["decision with rationale"],
     "abapObjectList": [
       {
         "sequence": 1,
         "objectType": "PROG",
-        "objectName": "ZFIN_OPEN_ITEMS",
+        "objectName": "ZXXX_OBJECT_NAME",
         "description": "string",
-        "keyLogic": [
-          "Step 1: ...",
-          "Step 2: ...",
-          "Step 3: ..."
-        ],
-        "dependencies": ["table KNA1", "table BSID"]
+        "keyLogic": ["Step 1: SELECT...", "Step 2: ..."],
+        "dependencies": ["Table: KNA1", "FM: CONVERSION_EXIT_ALPHA_INPUT"]
       }
     ],
-    "dataDictionary": "string - tables, structures, data elements used",
-    "programLogic": "string - overall program flow description",
-    "interfaceDesign": "string - RFC, BAPI, IDoc, REST integrations or N/A",
-    "dbDesign": "string - database access strategy, indexes, performance considerations",
-    "errorHandling": "string - technical error handling approach",
-    "transportStrategy": "string - transport request strategy",
+    "dataDictionary": "string",
+    "programLogic": "string",
+    "interfaceDesign": "N/A",
+    "dbDesign": "string",
+    "errorHandling": "string",
+    "transportStrategy": "string",
     "testScenarios": [
-      { "id": "TS-001", "description": "string", "expected": "string" }
+      { "id": "TS-001", "description": "string", "expected": "SY-SUBRC = 0, output description" }
     ],
-    "openItems": ["item 1", "item 2"]
+    "openItems": ["item"]
   }
 }`;
   }
 
   private static getSystemPrompt(): string {
-    return `You are a senior SAP technical architect with 15 years of experience writing 
-Technical Design Specifications for SAP S/4HANA RICEFW objects.
-Generate comprehensive, production-ready TDS documents.
-The ABAP Object List must be specific and complete — each object must have enough detail to generate ABAP code from.
-Object names must follow SAP naming conventions with Z prefix.
-Always include at least 3 test scenarios.
-Return ONLY valid JSON. No markdown code fences. No explanation text.`;
+    return `You are a senior SAP S/4HANA technical architect at a Big 4 consulting firm with 15 years of ABAP development experience writing production-quality Technical Design Specifications.
+
+Your TDS documents are known for:
+- Writing pseudocode with exact SAP table/field references (SELECT MATNR WERKS FROM MARC WHERE...)
+- Specifying exact ABAP class names, method names, parameter types
+- Referencing SAP function modules by exact name (CONVERSION_EXIT_ALPHA_INPUT, REUSE_ALV_GRID_DISPLAY)
+- Using proper ABAP data types (TYPE REF TO, TYPE TABLE OF, LIKE LINE OF)
+- Specifying BAdI names, enhancement spots, user exit names
+- Writing test scenarios with specific input values and expected SY-SUBRC values
+- Naming custom tables with Z prefix following SAP naming conventions
+- Being specific about transport strategy — Workbench vs Customizing, sequence
+
+Return ONLY valid JSON. No markdown fences. No preamble. No explanation.`;
   }
 
-  private static parseResponse(raw: string, state: any, fds: FdsDocument): TdsDocument {
+  private static parseResponse(raw: string, state: any, fds: FdsDocument, solutionOverview?: any): TdsDocument {
     try {
-      const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(cleaned);
+      const cleaned = raw
+        .replace(/```json/g, '')
+        .replace(/```/g, '')
+        .trim();
+
+      // Handle case where response starts with { directly
+      const jsonStart = cleaned.indexOf('{');
+      const jsonEnd = cleaned.lastIndexOf('}');
+      const jsonStr = jsonStart >= 0 && jsonEnd >= 0
+        ? cleaned.substring(jsonStart, jsonEnd + 1)
+        : cleaned;
+
+      const parsed = JSON.parse(jsonStr);
       const sections = parsed.sections ?? parsed;
 
-      return {
+return {
         title: state.title,
         author: 'DarkHorse Pipeline',
         version: '1.0',
@@ -178,16 +210,27 @@ Return ONLY valid JSON. No markdown code fences. No explanation text.`;
         }),
         status: 'Draft',
         fdsReference: `${fds.title} v${fds.version}`,
+        solutionOverview: solutionOverview ? {
+          summary: solutionOverview.solutionSummary ?? '',
+          overallCleanCoreLevel: solutionOverview.overallCleanCoreLevel ?? 'B',
+          level2Description: solutionOverview.level2Architecture?.description ?? '',
+          level3Description: solutionOverview.level3Architecture?.description ?? '',
+          cleanCoreAlignment: solutionOverview.cleanCoreAlignment ?? [],
+          deviations: solutionOverview.deviations ?? [],
+          errorHandlingApproach: solutionOverview.errorHandlingApproach ?? ''
+        } : undefined,
         sections: {
           technicalApproach: sections.technicalApproach ?? '',
-          designDecisions: sections.designDecisions ?? [],
+          designDecisions: Array.isArray(sections.designDecisions)
+            ? sections.designDecisions
+            : [],
           abapObjectList: (sections.abapObjectList ?? []).map((obj: any, idx: number) => ({
             sequence: obj.sequence ?? idx + 1,
             objectType: obj.objectType ?? 'PROG',
             objectName: obj.objectName ?? `ZOBJ_${idx + 1}`,
             description: obj.description ?? '',
-            keyLogic: obj.keyLogic ?? [],
-            dependencies: obj.dependencies ?? []
+            keyLogic: Array.isArray(obj.keyLogic) ? obj.keyLogic : [],
+            dependencies: Array.isArray(obj.dependencies) ? obj.dependencies : []
           })),
           dataDictionary: sections.dataDictionary ?? '',
           programLogic: sections.programLogic ?? '',
@@ -195,11 +238,18 @@ Return ONLY valid JSON. No markdown code fences. No explanation text.`;
           dbDesign: sections.dbDesign ?? '',
           errorHandling: sections.errorHandling ?? '',
           transportStrategy: sections.transportStrategy ?? '',
-          testScenarios: sections.testScenarios ?? [],
-          openItems: sections.openItems ?? []
+          testScenarios: Array.isArray(sections.testScenarios)
+            ? sections.testScenarios.map((t: any) => ({
+                id: t.id ?? 'TS-001',
+                description: t.description ?? '',
+                expected: t.expected ?? ''
+              }))
+            : [],
+          openItems: Array.isArray(sections.openItems) ? sections.openItems : []
         }
       };
-    } catch {
+    } catch (err) {
+      // If JSON parse fails — return skeleton with raw content in technicalApproach
       return {
         title: state.title,
         author: 'DarkHorse Pipeline',
@@ -208,7 +258,7 @@ Return ONLY valid JSON. No markdown code fences. No explanation text.`;
         status: 'Draft',
         fdsReference: fds.title,
         sections: {
-          technicalApproach: raw,
+          technicalApproach: `PARSE ERROR — Raw LLM response below. Please regenerate.\n\n${raw.substring(0, 500)}`,
           designDecisions: [],
           abapObjectList: [],
           dataDictionary: '',
@@ -218,7 +268,7 @@ Return ONLY valid JSON. No markdown code fences. No explanation text.`;
           errorHandling: '',
           transportStrategy: '',
           testScenarios: [],
-          openItems: ['NOTE: TDS parsing failed — review raw content above']
+          openItems: ['NOTE: TDS parsing failed — regenerate to retry']
         }
       };
     }

@@ -25,7 +25,7 @@ const API_VERSION    = '2023-06-01';
 
 // Timeout for API calls: 60 seconds
 // Long enough for complex code generation, short enough to avoid hanging the proxy
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 120_000;
 
 export class ClaudeAdapter implements ILLMAdapter {
 

@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { PipelineStateManager, PipelineStage } from './PipelineStateManager';
+import { PipelineStateManager, PipelineStage, CleanCoreLevel } from './PipelineStateManager';
 
 class PipelineItem extends vscode.TreeItem {
   constructor(
     label: string,
-    status: 'complete' | 'active' | 'pending' | 'info',
+    status: 'complete' | 'active' | 'pending' | 'info' | 'blocked' | 'warning',
     description?: string,
     command?: vscode.Command
   ) {
@@ -19,6 +19,8 @@ class PipelineItem extends vscode.TreeItem {
       case 'complete': return new vscode.ThemeIcon('check', new vscode.ThemeColor('charts.green'));
       case 'active':   return new vscode.ThemeIcon('loading~spin', new vscode.ThemeColor('charts.blue'));
       case 'pending':  return new vscode.ThemeIcon('circle-outline', new vscode.ThemeColor('charts.gray'));
+      case 'blocked':  return new vscode.ThemeIcon('error', new vscode.ThemeColor('charts.red'));
+      case 'warning':  return new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.yellow'));
       case 'info':     return new vscode.ThemeIcon('info');
       default:         return new vscode.ThemeIcon('circle-outline');
     }
@@ -45,20 +47,10 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
 
     if (!state) {
       return [
-        new PipelineItem(
-          'No active pipeline',
-          'info',
-          'Run: DarkHorse: Start Pipeline'
-        ),
-        new PipelineItem(
-          'Load Reference Docs',
-          'info',
-          'Optional but recommended',
-          {
-            command: 'darkhorse.pipeline.loadReferenceDocs',
-            title: 'Load Reference Docs'
-          }
-        )
+        new PipelineItem('No active pipeline', 'info', 'Run: DarkHorse: Start Pipeline'),
+        new PipelineItem('Load Reference Docs', 'info', 'Optional but recommended', {
+          command: 'darkhorse.pipeline.loadReferenceDocs', title: 'Load Reference Docs'
+        })
       ];
     }
 
@@ -66,11 +58,21 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
     const items: PipelineItem[] = [];
 
     // Pipeline title
-    items.push(new PipelineItem(
-      `📋 ${state.title}`,
-      'info',
-      state.ricefwType
-    ));
+    items.push(new PipelineItem(`📋 ${state.title}`, 'info', state.ricefwType));
+
+    // Blocked banner
+    if (stage === 'blocked_level_d') {
+      items.push(new PipelineItem(
+        '🚫 PIPELINE BLOCKED',
+        'blocked',
+        'Level D violation — refine BR and retry'
+      ));
+      items.push(new PipelineItem(
+        'Violated: ' + (state.levelDViolationDetails ?? 'Unknown component'),
+        'blocked', 'Must be resolved before proceeding'
+      ));
+      return items;
+    }
 
     // Reference docs
     items.push(new PipelineItem(
@@ -79,49 +81,69 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
       state.referenceDocsLoaded ? 'Loaded' : 'Not loaded'
     ));
 
-    // Stage 1: BR
-// Stage 1: BR
-    const brStatus = stage === 'br_captured' ? 'active' : 
-                    this.isAfter(stage, 'br_captured') ? 'complete' : 'pending';
+    // BR
+    const brStatus = stage === 'br_captured' ? 'active'
+      : this.isAfter(stage, 'br_captured') ? 'complete' : 'pending';
     items.push(new PipelineItem(
       'Business Requirement',
       brStatus,
-      brStatus === 'complete' ? 'Captured ✓' : 
-      brStatus === 'active' ? 'Captured — Awaiting FDS' : 'Pending'
+      brStatus === 'complete' ? 'Captured ✓' :
+      brStatus === 'active' ? 'Captured — Awaiting Solution Overview' : 'Pending'
     ));
-    // Stage 2: FDS
-    const fdsStatus = this.getStageStatus(stage, 'fds_approved');
+
+    // Solution Overview
+    const soStatus = stage === 'solution_overview_review' ? 'active'
+      : stage === 'solution_overview_generating' ? 'active'
+      : this.isAfter(stage, 'solution_overview_approved') ? 'complete'
+      : stage === 'solution_overview_approved' ? 'complete'
+      : 'pending';
+
+    const ccLevel = state.solutionOverview?.overallCleanCoreLevel;
+    const ccBadge = ccLevel ? ` [Level ${ccLevel}]` : '';
+    const hasLevelC = state.solutionOverview?.deviations.some(d => d.level === 'C');
+
+    items.push(new PipelineItem(
+      'Solution Overview',
+      hasLevelC ? 'warning' : soStatus,
+      stage === 'solution_overview_generating' ? 'Generating...' :
+      stage === 'solution_overview_review' ? `Under Review${ccBadge}` :
+      this.isAfter(stage, 'solution_overview_approved') || stage === 'solution_overview_approved'
+        ? `Approved ✓${ccBadge}` : 'Pending'
+    ));
+
+    // FDS
+    const fdsStatus = stage === 'fds_review' ? 'active'
+      : this.isAfter(stage, 'fds_approved') || stage === 'fds_approved' ? 'complete' : 'pending';
     items.push(new PipelineItem(
       'Functional Design Spec',
       fdsStatus,
       stage === 'fds_review' ? 'Under Review' :
-      stage === 'fds_approved' || this.isAfter(stage, 'fds_approved') ? 'Approved ✓' : 'Pending',
+      fdsStatus === 'complete' ? 'Approved ✓' : 'Pending',
       state.fdsFilePath ? {
-        command: 'vscode.open',
-        title: 'Open FDS',
+        command: 'vscode.open', title: 'Open FDS',
         arguments: [vscode.Uri.file(state.fdsFilePath)]
       } : undefined
     ));
 
-    // Stage 3: TDS
-    const tdsStatus = this.getStageStatus(stage, 'tds_approved');
+    // TDS
+    const tdsStatus = stage === 'tds_review' ? 'active'
+      : this.isAfter(stage, 'tds_approved') || stage === 'tds_approved' ? 'complete' : 'pending';
     items.push(new PipelineItem(
       'Technical Design Spec',
       tdsStatus,
       stage === 'tds_review' ? 'Under Review' :
-      stage === 'tds_approved' || this.isAfter(stage, 'tds_approved') ? 'Approved ✓' : 'Pending',
+      tdsStatus === 'complete' ? 'Approved ✓' : 'Pending',
       state.tdsFilePath ? {
-        command: 'vscode.open',
-        title: 'Open TDS',
+        command: 'vscode.open', title: 'Open TDS',
         arguments: [vscode.Uri.file(state.tdsFilePath)]
       } : undefined
     ));
 
-    // Stage 4: Code objects
+    // Code objects
     if (state.abapObjects.length > 0) {
       state.abapObjects.forEach((obj, idx) => {
-        const objStatus = obj.codeAccepted ? 'complete' :
-                          idx === state.currentObjectIndex ? 'active' : 'pending';
+        const objStatus = obj.codeAccepted ? 'complete'
+          : idx === state.currentObjectIndex ? 'active' : 'pending';
         items.push(new PipelineItem(
           `  ${obj.sequence}. ${obj.objectName}`,
           objStatus,
@@ -129,11 +151,9 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
           idx === state.currentObjectIndex ? 'In Progress' : obj.objectType
         ));
       });
-    } else if (this.isAfter(stage, 'tds_approved')) {
-      items.push(new PipelineItem('Code Generation', 'pending', 'Awaiting TDS approval'));
     }
 
-    // Stage complete
+    // Complete
     if (stage === 'complete') {
       items.push(new PipelineItem(
         '🎉 Pipeline Complete',
@@ -146,21 +166,12 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
   }
 
   private stageOrder: PipelineStage[] = [
-    'idle', 'br_captured', 'fds_generating', 'fds_review',
-    'fds_approved', 'tds_generating', 'tds_review',
-    'tds_approved', 'code_generating', 'complete'
+    'idle', 'br_captured',
+    'solution_overview_generating', 'solution_overview_review', 'solution_overview_approved',
+    'fds_generating', 'fds_review', 'fds_approved',
+    'tds_generating', 'tds_review', 'tds_approved',
+    'code_generating', 'complete', 'blocked_level_d'
   ];
-
-  private getStageStatus(
-    current: PipelineStage,
-    target: PipelineStage
-  ): 'complete' | 'active' | 'pending' {
-    const currentIdx = this.stageOrder.indexOf(current);
-    const targetIdx = this.stageOrder.indexOf(target);
-    if (currentIdx > targetIdx) { return 'complete'; }
-    if (currentIdx === targetIdx) { return 'active'; }
-    return 'pending';
-  }
 
   private isAfter(current: PipelineStage, target: PipelineStage): boolean {
     return this.stageOrder.indexOf(current) > this.stageOrder.indexOf(target);

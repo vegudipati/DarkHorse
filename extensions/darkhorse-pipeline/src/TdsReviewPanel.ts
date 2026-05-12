@@ -339,7 +339,6 @@ export class TdsReviewPanel {
   </div>
 
   <div class="content">
-
     <table class="doc-header-table">
       <tr><td>Title</td><td>${tds.title}</td></tr>
       <tr><td>Author</td><td>${tds.author}</td></tr>
@@ -347,6 +346,38 @@ export class TdsReviewPanel {
       <tr><td>Date</td><td>${tds.date}</td></tr>
       <tr><td>FDS Reference</td><td>${tds.fdsReference}</td></tr>
     </table>
+
+  ${tds.solutionOverview ? `
+    <div class="section">
+      <h3>0. Solution Overview Alignment</h3>
+      <div style="background:#1a2d1a;border:1px solid #238636;border-radius:6px;padding:16px;margin-bottom:16px">
+        <p style="font-size:13px;color:#3fb950;font-weight:600">
+          ✅ Overall Clean Core Level: ${tds.solutionOverview.overallCleanCoreLevel}
+        </p>
+        <p style="font-size:13px;color:#c9d1d9;margin-top:8px">${tds.solutionOverview.summary}</p>
+      </div>
+      ${tds.solutionOverview.cleanCoreAlignment.length > 0 ? `
+      <table class="req-table">
+        <thead><tr><th>Component</th><th>Approach</th><th>Level</th><th>Reasoning</th></tr></thead>
+        <tbody>
+          ${tds.solutionOverview.cleanCoreAlignment.map((c: any) => `
+          <tr>
+            <td style="font-weight:600;color:#58a6ff">${c.component}</td>
+            <td>${c.approach}</td>
+            <td style="text-align:center;font-weight:700">${c.level}</td>
+            <td style="color:#8b949e;font-size:12px">${c.reasoning}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : ''}
+      ${tds.solutionOverview.deviations.length > 0 ? `
+      <div style="margin-top:12px;background:#3a2a00;border:1px solid #e3b341;border-radius:6px;padding:12px">
+        <p style="color:#e3b341;font-weight:600;margin-bottom:8px">⚠️ Deviations</p>
+        ${tds.solutionOverview.deviations.map((d: any) =>
+          `<p style="font-size:13px;color:#c9d1d9">• ${d.component} [Level ${d.level}]: ${d.risk}</p>`
+        ).join('')}
+      </div>` : ''}
+    </div>` : ''}    
+
 
     <div class="section">
       <h3>1. Technical Approach & Design Decisions</h3>

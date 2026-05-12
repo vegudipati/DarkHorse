@@ -157,52 +157,75 @@ export class FdsGenerator {
     sapPackage: string,
     styleContext: string
   ): string {
-    return `Generate a complete Functional Design Specification for this SAP ${ricefwType} development.
+    return `Generate a detailed, professional Functional Design Specification for this SAP ${ricefwType} development. This document will be reviewed by senior SAP consultants and must be production-quality.
 
-Business Requirement:
+BUSINESS REQUIREMENT:
 ${brText}
 
-Technical Context:
+TECHNICAL CONTEXT:
 - RICEFW Type: ${ricefwType}
-- Primary Object Type: ${objectType}
+- Primary Object Type: ${objectType}  
 - SAP Package: ${sapPackage || 'Z-package TBD'}
 
-Style Guide:
+STYLE GUIDE:
 ${styleContext}
 
-Return ONLY a valid JSON object matching this exact structure. No markdown, no explanation:
+CRITICAL REQUIREMENTS FOR EACH SECTION:
+1. businessBackground: 2-3 paragraphs. Include: which SAP module is affected, current business pain point, business value of this development, impacted business roles/departments.
+2. scope.inScope: minimum 6 specific items with SAP object/transaction references
+3. scope.outOfScope: minimum 4 items that explicitly limit scope
+4. processOverview: detailed narrative (3-4 paragraphs) of the end-to-end business process, referencing specific SAP transactions (e.g. VA01, ME21N, MIRO), organizational units, and data flows
+5. functionalRequirements: minimum 8 requirements, each with specific SAP field names, table names, transaction codes where relevant. Include acceptance criteria in the description.
+6. uiDesign: describe exact screen layout, ALV columns with field names, selection screen fields with technical names (e.g. WERKS, BUKRS, MATNR), mandatory/optional flags
+7. inputOutputSpec: list every input field with technical name, SAP table source, data type, length. List every output field similarly.
+8. businessRules: minimum 6 rules written as specific IF/THEN conditions referencing SAP fields (e.g. "If MARC-MMSTA = 'Z1' then reject order with reason ZQ")
+9. errorHandling: minimum 5 error scenarios with exact error message text and handling procedure
+10. authorization: list specific SAP authorization objects (e.g. S_TCODE, F_BKPF_BUK), activity codes, and required business roles
+11. reportingRequirements: if report — list all ALV columns, subtotals, sort criteria, export formats
+12. openItems: list real assumptions about SAP configuration, master data, and dependencies
+
+Return ONLY a valid JSON object. No markdown. No explanation. No preamble:
 {
   "sections": {
-    "businessBackground": "string - why this is being built",
+    "businessBackground": "string",
     "scope": {
       "inScope": ["item 1", "item 2"],
       "outOfScope": ["item 1", "item 2"]
     },
-    "processOverview": "string - narrative of the business process",
+    "processOverview": "string",
     "functionalRequirements": [
-      { "id": "FR-001", "description": "string", "priority": "High" }
+      { "id": "FR-001", "description": "string with SAP field references and acceptance criteria", "priority": "High" }
     ],
-    "uiDesign": "string - screen/report layout description or N/A",
-    "inputOutputSpec": "string - input fields, output fields, data sources",
-    "businessRules": ["rule 1", "rule 2"],
-    "errorHandling": ["error scenario 1", "error scenario 2"],
-    "authorization": "string - authorization objects and roles required",
-    "reportingRequirements": "string - reporting needs or N/A",
-    "openItems": ["assumption 1", "dependency 1"]
+    "uiDesign": "string with field technical names",
+    "inputOutputSpec": "string with table/field references",
+    "businessRules": ["IF condition THEN action with SAP field references"],
+    "errorHandling": ["Error scenario: message text and handling"],
+    "authorization": "string with authorization objects and roles",
+    "reportingRequirements": "string",
+    "openItems": ["assumption or dependency"]
   }
 }`;
   }
 
   private static getSystemPrompt(): string {
-    return `You are a senior SAP functional consultant with 15 years of experience writing 
-Functional Design Specifications for SAP S/4HANA RICEFW objects.
-Generate comprehensive, professional FDS documents.
-Always include at least 5 functional requirements numbered FR-001, FR-002, etc.
-Be specific about SAP tables, transaction codes, and technical details where relevant.
-Return ONLY valid JSON. No markdown code fences. No explanation text.`;
+    return `You are a senior SAP S/4HANA functional consultant at a Big 4 consulting firm with 15 years of experience writing production-quality Functional Design Specifications for RICEFW objects.
+
+Your FDS documents are known for:
+- Referencing exact SAP table names (VBRK, VBRP, LIKP, KNA1, MARA, MARC, etc.)
+- Referencing exact SAP transaction codes (VA01, ME21N, MIRO, SE38, STMS, etc.)
+- Referencing exact SAP field names with structure prefix (VBRK-VBELN, MARC-MMSTA, MARA-MATNR)
+- Writing business rules as precise IF/THEN conditions
+- Specifying selection screen fields with technical names
+- Including authorization objects (S_TCODE, F_BKPF_BUK, S_DEVELOP, M_MSEG_BWA)
+- Being specific about error messages and handling procedures
+- Minimum 8 functional requirements with acceptance criteria
+- Never writing vague statements like "the system should handle errors appropriately"
+
+Return ONLY valid JSON matching the exact structure requested. No markdown fences. No preamble. No explanation.`;
   }
 
   private static parseResponse(raw: string, state: any): FdsDocument {
+    
     try {
       // Clean up response
       const cleaned = raw
@@ -210,9 +233,15 @@ Return ONLY valid JSON. No markdown code fences. No explanation text.`;
         .replace(/```/g, '')
         .trim();
 
-      const parsed = JSON.parse(cleaned);
+      const jsonStart = cleaned.indexOf('{');
+      const jsonEnd = cleaned.lastIndexOf('}'); 
+      const jsonStr = jsonStart >= 0 && jsonEnd >= 0
+          ? cleaned.substring(jsonStart, jsonEnd + 1)
+          : cleaned;
+      const parsed = JSON.parse(jsonStr);
       const sections = parsed.sections ?? parsed;
 
+      
       return {
         title: state.title,
         author: 'DarkHorse Pipeline',

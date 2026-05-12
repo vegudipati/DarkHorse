@@ -9,6 +9,24 @@ export interface TdsDocument {
   date: string;
   status: 'Draft' | 'Review' | 'Approved';
   fdsReference: string;
+  solutionOverview?: {
+    summary: string;
+    overallCleanCoreLevel: string;
+    level2Description: string;
+    level3Description: string;
+    cleanCoreAlignment: Array<{
+      component: string;
+      approach: string;
+      level: string;
+      reasoning: string;
+    }>;
+    deviations: Array<{
+      component: string;
+      level: string;
+      risk: string;
+    }>;
+    errorHandlingApproach: string;
+  };
   sections: {
     technicalApproach: string;
     designDecisions: string[];
@@ -182,6 +200,55 @@ export class DocxWriter {
       [3000, 6000]
     ));
     children.push(DocxWriter.spacer());
+
+    // Section 0 — Solution Overview alignment (if available)
+    if (tds.solutionOverview) {
+      const so = tds.solutionOverview;
+      children.push(DocxWriter.heading('0. Solution Overview & Clean Core Alignment', 2));
+      children.push(DocxWriter.para(
+        `This TDS is generated in alignment with the approved Solution Overview. ` +
+        `Overall Clean Core Level: ${so.overallCleanCoreLevel}`
+      ));
+      children.push(DocxWriter.spacer());
+
+      children.push(DocxWriter.heading('Solution Summary', 3));
+      children.push(DocxWriter.para(so.summary));
+      children.push(DocxWriter.spacer());
+
+      children.push(DocxWriter.heading('Architecture — Level 2 (WHAT)', 3));
+      children.push(DocxWriter.para(so.level2Description));
+      children.push(DocxWriter.spacer());
+
+      children.push(DocxWriter.heading('Architecture — Level 3 (HOW)', 3));
+      children.push(DocxWriter.para(so.level3Description));
+      children.push(DocxWriter.spacer());
+
+      children.push(DocxWriter.heading('Clean Core Alignment', 3));
+      if (so.cleanCoreAlignment.length > 0) {
+        children.push(DocxWriter.makeTable(
+          ['Component', 'Approach', 'Level', 'Reasoning'],
+          so.cleanCoreAlignment.map((c: any) => [
+            c.component, c.approach, `Level ${c.level}`, c.reasoning
+          ]),
+          [1800, 2200, 1000, 4360]
+        ));
+      }
+      children.push(DocxWriter.spacer());
+
+      if (so.deviations.length > 0) {
+        children.push(DocxWriter.heading('Deviations from Clean Core', 3));
+        children.push(DocxWriter.makeTable(
+          ['Component', 'Level', 'Risk'],
+          so.deviations.map((d: any) => [d.component, `Level ${d.level}`, d.risk]),
+          [2000, 1000, 6360]
+        ));
+        children.push(DocxWriter.spacer());
+      }
+
+      children.push(DocxWriter.heading('Error Handling Approach', 3));
+      children.push(DocxWriter.para(so.errorHandlingApproach));
+      children.push(DocxWriter.spacer());
+    }
 
     // Section 1
     children.push(DocxWriter.heading('1. Technical Approach & Design Decisions', 2));
