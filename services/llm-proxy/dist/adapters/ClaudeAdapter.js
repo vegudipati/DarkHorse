@@ -18,7 +18,7 @@ exports.ClaudeAdapter = void 0;
 const AbapSystemPrompt_1 = require("../AbapSystemPrompt");
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
-const MAX_TOKENS = 4096;
+const MAX_TOKENS = 8000;
 const API_VERSION = '2023-06-01';
 // Timeout for API calls: 60 seconds
 // Long enough for complex code generation, short enough to avoid hanging the proxy
