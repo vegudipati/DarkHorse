@@ -250,6 +250,29 @@ Source: Deloitte team FDS/TDS Git repo (RAG indexed)
 | SAP ABAP RAP Programming Guide | HTML | Public | Per SAP release |
 | SAP EML Reference | HTML | Public | Per SAP release |
 | SAP Cloudification Repository | JSON API | SAP Portal | Quarterly |
+| **SAP Architecture Center** | JS-rendered HTML | Public | Per SAP release |
+
+#### SAP Architecture Center — Special Handling Required
+URL: https://architecture.learning.sap.com/docs/ref-arch
+Contains 87 reference architecture documents — AI, integration, app development, Clean Core.
+
+IMPORTANT: This is a JavaScript-rendered Docusaurus site. Standard HTTP fetchers
+return empty content. Ingestion pipeline MUST use Puppeteer (headless Chrome) to
+render pages before extracting content.
+
+Priority documents for DarkHorse RAG:
+- Agentic AI & AI Agents: /docs/ref-arch/ca1d2a3e
+- Generative AI on SAP BTP: /docs/ref-arch/e5eb3b9b1d
+- Application to Application Integration: /docs/ref-arch/58f6d88e9a
+- DevOps with SAP BTP: /docs/ref-arch/1c5706feb5
+- Transitioning Architectures from SAP NetWeaver: /docs/ref-arch/9a5f7b59dc
+- Integrate and Extend with SAP Build Process Automation: /docs/ref-arch/99fd0564be
+
+Ingestion steps:
+1. npm install puppeteer in ingestion service
+2. Launch headless Chrome, navigate to each URL
+3. Wait for JS render (waitForSelector on content div)
+4. Extract text, chunk 500 tokens, embed, index in Azure AI Search
 
 ### Priority 2 — Sprint 3-4
 | Source | Format | Access | Update Frequency |
