@@ -1,0 +1,135 @@
+{
+  "_metadata": {
+    "sourceVersion": "sprint-2-session-2-seed",
+    "fetchedAt":     "2026-05-21T00:00:00Z",
+    "notes":         "Curated seed extract from the SAP Clean Core Extensibility Guide. Each entry distils one canonical rule or pattern. The live PDF fetcher (CleanCoreGuideFetcher live=true) replaces this fixture once a Deloitte-pinned PDF URL is available."
+  },
+  "entries": [
+    {
+      "patternId":      "LEVEL_A_DEFINITION",
+      "title":          "Clean Core Level A — Released SAP APIs",
+      "module":         null,
+      "cleanCoreLevel": "A",
+      "description":    "Level A objects are released SAP APIs and extension points: released CDS interface views (I_*), Released RAP Behavior Definitions (BDEFs) consumed via EML, released BAdIs in published enhancement spots, Application Log (SLG1), Application Jobs (APJ), and the Custom Business Object (CBO) framework. Level A is cloud-ready, upgrade-safe, and the primary target for any new development. Use Level A unless no Level A option exists for the requirement.",
+      "url":             null,
+      "metadata":        { "preferenceOrder": 1 }
+    },
+    {
+      "patternId":      "LEVEL_B_DEFINITION",
+      "title":          "Clean Core Level B — Classic stable interfaces",
+      "module":         null,
+      "cleanCoreLevel": "B",
+      "description":    "Level B objects are classic stable SAP interfaces that are supported but legacy: BAPIs, classic BAdIs in customer-namespace enhancement spots, customer exits (USEREXIT_* form routines in named includes such as MV45AFZZ), classic Application Log objects. Level B is acceptable only when a Level A alternative is unavailable. Document the reason for choosing Level B over Level A in the design.",
+      "url":             null,
+      "metadata":        { "preferenceOrder": 2 }
+    },
+    {
+      "patternId":      "LEVEL_C_DEFINITION",
+      "title":          "Clean Core Level C — Discouraged",
+      "module":         null,
+      "cleanCoreLevel": "C",
+      "description":    "Level C is direct access to SAP standard objects bypassing released APIs: direct SELECTs on SAP standard tables (VBAK, MARA, KNA1, BKPF, BSEG, etc.), CALL FUNCTION on unreleased function modules, direct INSERT/UPDATE/DELETE on SAP standard tables, custom log tables instead of SLG1. Level C is discouraged and must be refactored to Level A/B during code review.",
+      "url":             null,
+      "metadata":        { "preferenceOrder": 3 }
+    },
+    {
+      "patternId":      "LEVEL_D_DEFINITION",
+      "title":          "Clean Core Level D — Prohibited",
+      "module":         null,
+      "cleanCoreLevel": "D",
+      "description":    "Level D is modification of SAP standard code: implicit enhancements (ENHANCEMENT without released spot), core modifications via SE38/SE80, custom Z* tables receiving direct INSERTs that duplicate SAP standard data, hallucinated extension points (e.g. references to USEREXIT_ATP_QUANTITY which does not exist). Level D is prohibited and blocks the pipeline.",
+      "url":             null,
+      "metadata":        { "preferenceOrder": 4 }
+    },
+    {
+      "patternId":      "RAP_TRANSACTIONAL",
+      "title":          "Use RAP Behavior Definitions for transactional writes",
+      "module":         null,
+      "cleanCoreLevel": "A",
+      "description":    "For any transactional operation on a SAP standard business object that has a released RAP Behavior Definition (BDEF), the code MUST use EML (Entity Manipulation Language) against the BDEF rather than calling the classic BAPI. EML CREATE / UPDATE / DELETE / READ on the released BDEF is Level A; the equivalent BAPI is Level B. Commit work via the COMMIT ENTITIES statement.",
+      "url":             null,
+      "metadata":        { "replaces": "BAPI" }
+    },
+    {
+      "patternId":      "CDS_READ_ACCESS",
+      "title":          "Use released CDS interface views for all read access",
+      "module":         null,
+      "cleanCoreLevel": "A",
+      "description":    "All read access to SAP standard data MUST go through released CDS interface views (I_*). Direct SELECTs on SAP standard tables are Level C. Released CDS views provide language-dependent texts, currency conversion, authorization, and stable column contracts across SAP releases. Look up the released CDS view in the SAP Business Accelerator Hub before referencing any SAP standard table.",
+      "url":             null,
+      "metadata":        { "replaces": "Direct SELECT on SAP standard tables" }
+    },
+    {
+      "patternId":      "EML_WRITES",
+      "title":          "Use EML for all writes on RAP-managed objects",
+      "module":         null,
+      "cleanCoreLevel": "A",
+      "description":    "Writes to RAP-managed business objects MUST use Entity Manipulation Language (EML): MODIFY ENTITIES OF <BDEF> CREATE/UPDATE/DELETE. Direct INSERT/UPDATE/DELETE on the underlying tables is Level C. BAPIs are Level B and acceptable only when no released RAP BDEF exists.",
+      "url":             null,
+      "metadata":        { "replaces": "INSERT/UPDATE/DELETE on SAP tables" }
+    },
+    {
+      "patternId":      "SLG1_LOGGING",
+      "title":          "Use Application Log (SLG1) for all logging",
+      "module":         null,
+      "cleanCoreLevel": "A",
+      "description":    "All application logging MUST use the SAP Application Log (transaction SLG1) via BAL_LOG_CREATE / BAL_LOG_MSG_ADD / BAL_DB_SAVE or the CL_BALI / CL_BAL_FACTORY class hierarchy. Custom Z log tables are Level C. Register a custom log object and one subobject per business scenario in SLG0 — for example object Z_DARKHORSE with subobjects Z_BACKORDER, Z_RAP, Z_BATCH.",
+      "url":             null,
+      "metadata":        { "replaces": "Custom Z log tables" }
+    },
+    {
+      "patternId":      "APPLICATION_JOBS",
+      "title":          "Use Application Jobs (APJ) framework, not classic SM37",
+      "module":         null,
+      "cleanCoreLevel": "A",
+      "description":    "Background jobs MUST use the Application Jobs framework: implement IF_APJ_RT_RUN and register a job catalog entry via SE80. Classic SM37 / JOB_OPEN / JOB_CLOSE FMs are Level B. Application Jobs run in S/4HANA Cloud, support job templates, and integrate with the Application Log automatically.",
+      "url":             null,
+      "metadata":        { "replaces": "JOB_OPEN / JOB_CLOSE / SM37" }
+    },
+    {
+      "patternId":      "BADIS_OVER_USER_EXITS",
+      "title":          "Prefer released BAdIs over legacy user exits",
+      "module":         null,
+      "cleanCoreLevel": "A",
+      "description":    "When an extension point is needed, use released BAdIs in published enhancement spots (Level A). Legacy customer exits (USEREXIT_* form routines in includes like MV45AFZZ) are Level B and should only be used when no released BAdI covers the requirement. Hallucinated names such as USEREXIT_ATP_QUANTITY do not exist — the corresponding released BAdI is ATP_CUST_BADI.",
+      "url":             null,
+      "metadata":        { "replaces": "USEREXIT_* customer exits" }
+    },
+    {
+      "patternId":      "SIDE_BY_SIDE_EXTENSIBILITY",
+      "title":          "Side-by-side extensibility on SAP BTP",
+      "module":         null,
+      "cleanCoreLevel": "A",
+      "description":    "New standalone functionality, integrations, and Fiori apps not covered by S/4HANA standard should run side-by-side on SAP BTP — CAP, RAP-on-BTP, Build Apps, Build Process Automation. Side-by-side extensions communicate with S/4HANA exclusively via released APIs (OData, RAP, Events), keeping the digital core clean. This is the preferred extensibility model for greenfield functionality.",
+      "url":             null,
+      "metadata":        { "platform": "SAP BTP" }
+    },
+    {
+      "patternId":      "IN_APP_EXTENSIBILITY",
+      "title":          "In-app extensibility — key user and developer extensions",
+      "module":         null,
+      "cleanCoreLevel": "A",
+      "description":    "Small changes within S/4HANA should use in-app extensibility: Key User Extensibility (custom fields, custom logic via cloud-shell IDE BAdIs), Custom Business Objects, Custom Reusable Elements. In-app extensions are persisted as released metadata and survive upgrades. Avoid traditional ABAP development in the digital core except where a released RAP BO and in-app option are unavailable.",
+      "url":             null,
+      "metadata":        { "context": "In-app S/4HANA" }
+    },
+    {
+      "patternId":      "CBO_CUSTOM_PERSISTENT",
+      "title":          "Use the CBO framework for custom persistent data",
+      "module":         null,
+      "cleanCoreLevel": "A",
+      "description":    "Custom persistent data MUST use the Custom Business Object (CBO) framework — defined via the Custom Business Object app, exposed as a generated CDS view + RAP BDEF + OData service. Direct creation of Z* tables and writing INSERTs to them is Level C and breaks Cloud compatibility. CBOs participate in the standard transactional lifecycle and authorization model.",
+      "url":             null,
+      "metadata":        { "replaces": "Custom Z* tables" }
+    },
+    {
+      "patternId":      "NO_DIRECT_TABLE_INSERTS",
+      "title":          "Never write directly to SAP standard tables",
+      "module":         null,
+      "cleanCoreLevel": "C",
+      "description":    "Direct INSERT/UPDATE/DELETE on SAP standard tables (VBAK, BKPF, BSEG, KNA1, MARA, etc.) is Level C — and may corrupt downstream SAP processing. All transactional writes MUST go through released RAP BDEFs (Level A) or, when a BDEF is not available, the corresponding BAPI (Level B). The pipeline flags any direct write to a SAP standard table as a Clean Core violation.",
+      "url":             null,
+      "metadata":        { "scanRule": "INSERT/UPDATE/DELETE on SAP std table" }
+    }
+  ]
+}

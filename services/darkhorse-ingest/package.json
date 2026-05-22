@@ -1,0 +1,42 @@
+{
+  "name": "darkhorse-ingest",
+  "version": "0.6.0",
+  "description": "DarkHorse RAG ingestion pipeline — fetches SAP knowledge sources, chunks, embeds, and indexes them for retrieval by the darkhorse-mcp server.",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build":       "tsc --project tsconfig.json",
+    "build:watch": "tsc --project tsconfig.json --watch",
+    "clean":       "rimraf dist",
+    "rebuild":     "npm run clean && npm run build",
+    "start":       "node dist/index.js",
+    "ingest":      "node dist/index.js ingest",
+    "verify":      "node dist/index.js verify"
+  },
+  "dependencies": {
+    "@azure/search-documents": "^12.1.0",
+    "openai":                  "^4.71.0",
+    "pdf-parse":               "^1.1.1",
+    "puppeteer-core":          "^23.0.0"
+  },
+  "devDependencies": {
+    "@types/node":     "^22.0.0",
+    "@types/pdf-parse": "^1.1.4",
+    "rimraf":          "^6.0.1",
+    "typescript":      "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "notes": {
+    "purpose": "CPI-6 Sprint 2: RAG ingestion pipeline. Fetches SAP knowledge sources (SAP API Hub, Clean Core Extensibility Guide, SAP Architecture Center), chunks them, embeds them via a pluggable embedder, and writes them to a pluggable vector index.",
+    "no-native-modules": "Pure JS only. Uses Node 20's built-in fetch — no node-fetch dep.",
+    "pluggable-backends": "Embedder and VectorIndex are interfaces; Sprint 2 ships with in-memory mock backends. Real Azure OpenAI + Azure AI Search clients are swapped in a later session without touching the pipeline orchestration.",
+    "future-sprints": [
+      "Sprint 2 session 2: PDF fetcher for SAP Clean Core Extensibility Guide",
+      "Sprint 2 session 3: Puppeteer fetcher for SAP Architecture Center (JS-rendered Docusaurus)",
+      "Sprint 2 session 4: refactor darkhorse-mcp tools to query the index with static-catalog fallback",
+      "Sprint 6: correction-store fetcher feeding developer edits back into the index"
+    ]
+  }
+}

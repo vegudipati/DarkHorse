@@ -1,0 +1,39 @@
+{
+  "name": "darkhorse-mcp",
+  "version": "0.6.0",
+  "description": "DarkHorse MCP Knowledge Service — grounded SAP knowledge tools that eliminate hallucinated SAP references in code generation",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build":       "tsc --project tsconfig.json",
+    "build:watch": "tsc --project tsconfig.json --watch",
+    "clean":       "rimraf dist",
+    "rebuild":     "npm run clean && npm run build",
+    "start":       "node dist/index.js",
+    "test":        "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "dependencies": {
+    "@azure/search-documents": "^12.1.0",
+    "express":                 "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express":  "^4.17.21",
+    "@types/node":     "^22.0.0",
+    "rimraf":          "^6.0.1",
+    "typescript":      "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "notes": {
+    "purpose": "CPI-6 Sprint 1: MCP server scaffold + verification tools. Eliminates hallucinated SAP exits/BAdIs from generated code by giving agents a grounded SAP knowledge service to query before referencing any SAP object.",
+    "no-native-modules": "This package deliberately contains NO native npm modules — pure JS only. Static JSON catalogs back all tools in Sprint 1.",
+    "transport": "HTTP server bound to 127.0.0.1 only — same security model as llm-proxy. JSON request/response per tool endpoint. Migrates to full MCP protocol (stdio or HTTP+SSE) in a later sprint.",
+    "catalog-source-of-truth": "catalog/*.json files seed Sprint 1 knowledge. Sprint 2 replaces these with Azure AI Search queries against the Cloudification Repository + SAP API Hub.",
+    "future-sprints": [
+      "Sprint 2: Replace static catalogs with Azure AI Search RAG queries",
+      "Sprint 3-5: Wire SO/FDS/TDS/Code agents to call these tools before generating",
+      "Sprint 6: Correction Store + Review Agent feedback loop"
+    ]
+  }
+}

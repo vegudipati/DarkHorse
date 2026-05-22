@@ -1,0 +1,378 @@
+{
+  "_metadata": {
+    "source": "Sprint 1 seed extract from the SAP Cloudification Repository — focused on the SD/MM/FI scope used by DarkHorse's current test cases (backorder, finance open items, PO validation).",
+    "schemaVersion": "1.0.0",
+    "updatedAt": "2026-05-21",
+    "totalEntries": 38,
+    "levelLegend": {
+      "A": "Released cloud-ready API/view — public, stable, target of all new development",
+      "B": "Released for on-premise S/4HANA — acceptable for Private Cloud / on-prem deployments",
+      "C": "Not released — classic SAP object, prohibited for new development; must use Level A/B alternative",
+      "D": "Deprecated / non-existent / explicitly forbidden by Clean Core guidance"
+    },
+    "objectTypes": {
+      "TABL": "Database table",
+      "VIEW": "Classic ABAP DDIC view",
+      "CDS":  "CDS view (any)",
+      "FUNC": "Function module",
+      "BAPI": "Business API function module",
+      "CLAS": "ABAP class",
+      "PROG": "ABAP program / report",
+      "TRAN": "Transaction code",
+      "BDEF": "RAP Behavior Definition",
+      "DDLS": "CDS data definition source"
+    }
+  },
+  "objects": [
+    {
+      "name": "VBAK",
+      "type": "TABL",
+      "level": "C",
+      "module": "SD",
+      "description": "Sales document header table. Direct SELECT prohibited.",
+      "reasoning": "Direct table access bypasses SAP-managed extensions, currency conversions, and authorization checks. Use the released CDS view instead.",
+      "alternatives": [
+        { "name": "I_SalesDocument",  "type": "CDS", "level": "A", "notes": "Header-level sales document released view" }
+      ]
+    },
+    {
+      "name": "VBAP",
+      "type": "TABL",
+      "level": "C",
+      "module": "SD",
+      "description": "Sales document item table.",
+      "alternatives": [
+        { "name": "I_SalesDocumentItem", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "VBEP",
+      "type": "TABL",
+      "level": "C",
+      "module": "SD",
+      "description": "Sales document schedule lines (used in backorder/ATP).",
+      "alternatives": [
+        { "name": "I_SalesDocumentScheduleLine", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "VBPA",
+      "type": "TABL",
+      "level": "C",
+      "module": "SD",
+      "description": "Sales document partner table.",
+      "alternatives": [
+        { "name": "I_SalesDocumentPartner", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "VBFA",
+      "type": "TABL",
+      "level": "C",
+      "module": "SD",
+      "description": "Sales document flow table.",
+      "alternatives": [
+        { "name": "I_SDDocumentProcessFlow", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "VBUK",
+      "type": "TABL",
+      "level": "D",
+      "module": "SD",
+      "description": "OBSOLETE in S/4HANA — status data merged into VBAK. Never reference."
+    },
+    {
+      "name": "VBUP",
+      "type": "TABL",
+      "level": "D",
+      "module": "SD",
+      "description": "OBSOLETE in S/4HANA — status data merged into VBAP. Never reference."
+    },
+    {
+      "name": "MARA",
+      "type": "TABL",
+      "level": "C",
+      "module": "MM",
+      "description": "Material master general data.",
+      "alternatives": [
+        { "name": "I_Product",         "type": "CDS", "level": "A" },
+        { "name": "I_ProductBasicText","type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "MARC",
+      "type": "TABL",
+      "level": "C",
+      "module": "MM",
+      "description": "Material plant data.",
+      "alternatives": [
+        { "name": "I_ProductPlant", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "MARD",
+      "type": "TABL",
+      "level": "C",
+      "module": "MM",
+      "description": "Material storage location stock.",
+      "alternatives": [
+        { "name": "I_ProductStorageLocation", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "MAKT",
+      "type": "TABL",
+      "level": "C",
+      "module": "MM",
+      "description": "Material descriptions.",
+      "alternatives": [
+        { "name": "I_ProductDescription", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "EKKO",
+      "type": "TABL",
+      "level": "C",
+      "module": "MM",
+      "description": "Purchase order header.",
+      "alternatives": [
+        { "name": "I_PurchaseOrder", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "EKPO",
+      "type": "TABL",
+      "level": "C",
+      "module": "MM",
+      "description": "Purchase order item.",
+      "alternatives": [
+        { "name": "I_PurchaseOrderItem", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "EBAN",
+      "type": "TABL",
+      "level": "C",
+      "module": "MM",
+      "description": "Purchase requisition.",
+      "alternatives": [
+        { "name": "I_PurchaseRequisition",     "type": "CDS", "level": "A" },
+        { "name": "I_PurchaseRequisitionItem", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "KNA1",
+      "type": "TABL",
+      "level": "C",
+      "module": "SD",
+      "description": "Customer master general data — in S/4 Business Partner is the leading object.",
+      "alternatives": [
+        { "name": "I_Customer",        "type": "CDS", "level": "A" },
+        { "name": "I_BusinessPartner", "type": "CDS", "level": "A", "notes": "Preferred — BP is the leading object in S/4HANA" }
+      ]
+    },
+    {
+      "name": "KNB1",
+      "type": "TABL",
+      "level": "C",
+      "module": "FI",
+      "description": "Customer master company code data.",
+      "alternatives": [
+        { "name": "I_CustomerCompany", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "LFA1",
+      "type": "TABL",
+      "level": "C",
+      "module": "MM",
+      "description": "Vendor master general data.",
+      "alternatives": [
+        { "name": "I_Supplier",        "type": "CDS", "level": "A" },
+        { "name": "I_BusinessPartner", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "BSEG",
+      "type": "TABL",
+      "level": "C",
+      "module": "FI",
+      "description": "Accounting document line items (cluster table — never SELECT directly).",
+      "alternatives": [
+        { "name": "I_JournalEntryItem", "type": "CDS", "level": "A" },
+        { "name": "ACDOCA",             "type": "TABL", "level": "B", "notes": "Universal Journal table — Level B because direct access is still allowed in on-premise but CDS is preferred." }
+      ]
+    },
+    {
+      "name": "BKPF",
+      "type": "TABL",
+      "level": "C",
+      "module": "FI",
+      "description": "Accounting document header.",
+      "alternatives": [
+        { "name": "I_JournalEntry", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "BSID",
+      "type": "TABL",
+      "level": "D",
+      "module": "FI",
+      "description": "Customer open items — index table NOT MAINTAINED in S/4HANA. Never use for new development.",
+      "alternatives": [
+        { "name": "I_CustomerOpenItem", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "BSAD",
+      "type": "TABL",
+      "level": "D",
+      "module": "FI",
+      "description": "Customer cleared items — index table NOT MAINTAINED in S/4HANA.",
+      "alternatives": [
+        { "name": "I_CustomerClearedItem", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "BSIK",
+      "type": "TABL",
+      "level": "D",
+      "module": "FI",
+      "description": "Vendor open items — index table NOT MAINTAINED in S/4HANA.",
+      "alternatives": [
+        { "name": "I_SupplierOpenItem", "type": "CDS", "level": "A" }
+      ]
+    },
+    {
+      "name": "ACDOCA",
+      "type": "TABL",
+      "level": "B",
+      "module": "FI",
+      "description": "Universal Journal line item — direct SELECT acceptable on-prem but CDS view preferred for cloud portability.",
+      "alternatives": [
+        { "name": "I_JournalEntryItem", "type": "CDS", "level": "A" }
+      ]
+    },
+
+    {
+      "name": "BAPI_SALESORDER_CREATEFROMDAT2",
+      "type": "BAPI",
+      "level": "B",
+      "module": "SD",
+      "description": "Classic BAPI for sales order creation. Replaced by RAP behavior on I_SalesOrder.",
+      "alternatives": [
+        { "name": "I_SalesOrderTP", "type": "BDEF", "level": "A", "notes": "Use EML MODIFY ENTITIES OF I_SalesOrderTP CREATE FROM ..." }
+      ]
+    },
+    {
+      "name": "BAPI_DELIVERYPROCESSING_EXEC",
+      "type": "BAPI",
+      "level": "B",
+      "module": "SD",
+      "description": "Classic delivery processing BAPI. RAP behavior preferred for cloud.",
+      "alternatives": [
+        { "name": "I_OutboundDeliveryTP", "type": "BDEF", "level": "A" }
+      ]
+    },
+    {
+      "name": "BAPI_PO_CREATE1",
+      "type": "BAPI",
+      "level": "B",
+      "module": "MM",
+      "description": "Classic PO creation BAPI.",
+      "alternatives": [
+        { "name": "I_PurchaseOrderTP", "type": "BDEF", "level": "A" }
+      ]
+    },
+    {
+      "name": "BAPI_GOODSMVT_CREATE",
+      "type": "BAPI",
+      "level": "B",
+      "module": "MM",
+      "description": "Classic goods movement BAPI.",
+      "alternatives": [
+        { "name": "API_MATERIAL_DOCUMENT_SRV", "type": "BAPI", "level": "A", "notes": "OData-released goods movement API" }
+      ]
+    },
+    {
+      "name": "BAPI_ACC_DOCUMENT_POST",
+      "type": "BAPI",
+      "level": "A",
+      "module": "FI",
+      "description": "Accounting document posting BAPI. Released cloud-ready."
+    },
+
+    {
+      "name": "I_SalesOrderTP",
+      "type": "BDEF",
+      "level": "A",
+      "module": "SD",
+      "description": "RAP Behavior Definition for the released Sales Order business object. EML target for create/update/delete."
+    },
+    {
+      "name": "I_PurchaseOrderTP",
+      "type": "BDEF",
+      "level": "A",
+      "module": "MM",
+      "description": "RAP Behavior Definition for Purchase Order."
+    },
+    {
+      "name": "I_OutboundDeliveryTP",
+      "type": "BDEF",
+      "level": "A",
+      "module": "SD",
+      "description": "RAP Behavior Definition for Outbound Delivery."
+    },
+
+    {
+      "name": "I_SalesDocument",
+      "type": "CDS",
+      "level": "A",
+      "module": "SD",
+      "description": "Released interface CDS view — sales document header."
+    },
+    {
+      "name": "I_SalesDocumentItem",
+      "type": "CDS",
+      "level": "A",
+      "module": "SD",
+      "description": "Released interface CDS view — sales document item."
+    },
+    {
+      "name": "I_Product",
+      "type": "CDS",
+      "level": "A",
+      "module": "MM",
+      "description": "Released interface CDS view — material/product."
+    },
+    {
+      "name": "I_PurchaseOrder",
+      "type": "CDS",
+      "level": "A",
+      "module": "MM",
+      "description": "Released interface CDS view — purchase order header."
+    },
+    {
+      "name": "I_BusinessPartner",
+      "type": "CDS",
+      "level": "A",
+      "module": "BP",
+      "description": "Released interface CDS view — Business Partner (leading object in S/4HANA for customer/vendor)."
+    },
+    {
+      "name": "I_JournalEntryItem",
+      "type": "CDS",
+      "level": "A",
+      "module": "FI",
+      "description": "Released interface CDS view — Universal Journal line items."
+    },
+    {
+      "name": "I_CustomerOpenItem",
+      "type": "CDS",
+      "level": "A",
+      "module": "FI",
+      "description": "Released interface CDS view — customer open items. Replaces BSID."
+    }
+  ]
+}

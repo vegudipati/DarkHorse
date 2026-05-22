@@ -1,0 +1,1 @@
+{"version":3,"file":"BrowserDiscovery.d.ts","sourceRoot":"","sources":["../../src/fetchers/BrowserDiscovery.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;;;;GAeG;AAiBH,MAAM,WAAW,iBAAiB;IAChC,cAAc,EAAE,MAAM,CAAC;IACvB,OAAO,EAAS,QAAQ,GAAG,MAAM,CAAC;IAClC,MAAM,EAAU,KAAK,GAAG,gBAAgB,GAAG,cAAc,CAAC;CAC3D;AAED,wBAAgB,eAAe,CAAC,WAAW,CAAC,EAAE,MAAM,GAAG,iBAAiB,CAsCvE"}

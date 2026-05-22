@@ -1,0 +1,237 @@
+{
+  "_metadata": {
+    "source": "Sprint 1 seed data — curated subset of SAP customer exits (SMOD/CMOD) and user exits. These are CLASSIC enhancements, max Level B even when they exist.",
+    "schemaVersion": "1.0.0",
+    "updatedAt": "2026-05-21",
+    "totalEntries": 23,
+    "exitTypes": {
+      "CUSTOMER_EXIT": "SMOD/CMOD function-module-based exit (EXIT_<PROG>_<NNN>)",
+      "USER_EXIT": "FORM routine in include (e.g. MV45AFZZ, MV50AFZ1)",
+      "MENU_EXIT": "Menu enhancement registered in CMOD",
+      "SCREEN_EXIT": "Screen enhancement (CMOD + screen elements)"
+    },
+    "levelLegend": {
+      "B": "Classic exit, still functional in on-premise S/4HANA — acceptable when no Level A BAdI exists",
+      "C": "Classic exit, retained for compatibility — prefer BAdI/RAP",
+      "D": "Deprecated or non-existent — never reference"
+    },
+    "lastDeveloperAcknowledgementAt": "2026-05-21T18:08:39.864Z"
+  },
+  "exits": [
+    {
+      "name": "EXIT_SAPLMEREQ_001",
+      "type": "CUSTOMER_EXIT",
+      "enhancement": "MEREQ001",
+      "function_module": "EXIT_SAPLMEREQ_001",
+      "include": "ZXM02U01",
+      "program": "SAPLMEREQ",
+      "level": "B",
+      "module": "MM",
+      "description": "Customer's own data in purchase requisition.",
+      "alternative": "ME_REQ_POSTED (Level A BAdI)"
+    },
+    {
+      "name": "EXIT_SAPMM06E_012",
+      "type": "CUSTOMER_EXIT",
+      "enhancement": "MM06E005",
+      "function_module": "EXIT_SAPMM06E_012",
+      "include": "ZXM06U37",
+      "program": "SAPMM06E",
+      "level": "B",
+      "module": "MM",
+      "description": "Customer fields in purchase order — replaced by ME_PROCESS_PO_CUST BAdI."
+    },
+    {
+      "name": "EXIT_SAPLV09A_001",
+      "type": "CUSTOMER_EXIT",
+      "enhancement": "V09A0001",
+      "function_module": "EXIT_SAPLV09A_001",
+      "program": "SAPLV09A",
+      "level": "B",
+      "module": "SD",
+      "description": "Determine partner functions in sales document."
+    },
+    {
+      "name": "EXIT_SAPMV45A_001",
+      "type": "CUSTOMER_EXIT",
+      "enhancement": "V45A0001",
+      "function_module": "EXIT_SAPMV45A_001",
+      "include": "ZXVVAU01",
+      "program": "SAPMV45A",
+      "level": "B",
+      "module": "SD",
+      "description": "Customer-specific fields in sales document."
+    },
+    {
+      "name": "USEREXIT_SAVE_DOCUMENT_PREPARE",
+      "type": "USER_EXIT",
+      "include": "MV45AFZZ",
+      "program": "SAPMV45A",
+      "level": "B",
+      "module": "SD",
+      "description": "User exit called before sales document is saved. FORM routine in MV45AFZZ.",
+      "alternative": "BADI_SD_SALES_BASIC (Level A)"
+    },
+    {
+      "name": "USEREXIT_SAVE_DOCUMENT",
+      "type": "USER_EXIT",
+      "include": "MV45AFZZ",
+      "program": "SAPMV45A",
+      "level": "B",
+      "module": "SD",
+      "description": "User exit called when sales document is saved."
+    },
+    {
+      "name": "USEREXIT_MOVE_FIELD_TO_VBAK",
+      "type": "USER_EXIT",
+      "include": "MV45AFZZ",
+      "program": "SAPMV45A",
+      "level": "B",
+      "module": "SD",
+      "description": "Move data from communication structure to VBAK."
+    },
+    {
+      "name": "USEREXIT_MOVE_FIELD_TO_VBAP",
+      "type": "USER_EXIT",
+      "include": "MV45AFZZ",
+      "program": "SAPMV45A",
+      "level": "B",
+      "module": "SD",
+      "description": "Move data from communication structure to VBAP (sales item)."
+    },
+    {
+      "name": "USEREXIT_PRICING_PREPARE_TKOMK",
+      "type": "USER_EXIT",
+      "include": "MV45AFZB",
+      "program": "SAPMV45A",
+      "level": "B",
+      "module": "SD",
+      "description": "Pricing communication structure header preparation."
+    },
+    {
+      "name": "USEREXIT_PRICING_PREPARE_TKOMP",
+      "type": "USER_EXIT",
+      "include": "MV45AFZB",
+      "program": "SAPMV45A",
+      "level": "B",
+      "module": "SD",
+      "description": "Pricing communication structure item preparation."
+    },
+    {
+      "name": "USEREXIT_NEW_PRICING_VBKD",
+      "type": "USER_EXIT",
+      "include": "MV45AFZB",
+      "program": "SAPMV45A",
+      "level": "B",
+      "module": "SD",
+      "description": "Decide if new pricing should be triggered for VBKD changes."
+    },
+    {
+      "name": "USEREXIT_PRICING_CHECK",
+      "type": "USER_EXIT",
+      "include": "MV45AFZB",
+      "program": "SAPMV45A",
+      "level": "B",
+      "module": "SD",
+      "description": "Check pricing-relevant fields for changes."
+    },
+    {
+      "name": "USEREXIT_FILL_VBAP_FROM_HVBAP",
+      "type": "USER_EXIT",
+      "include": "MV45AFZZ",
+      "program": "SAPMV45A",
+      "level": "B",
+      "module": "SD",
+      "description": "Fill higher-level item structure during sales item processing."
+    },
+    {
+      "name": "EXIT_SAPLF048_001",
+      "type": "CUSTOMER_EXIT",
+      "enhancement": "F050S001",
+      "function_module": "EXIT_SAPLF048_001",
+      "program": "SAPLF048",
+      "level": "B",
+      "module": "FI",
+      "description": "FI document data check exit.",
+      "alternative": "ACC_DOCUMENT (Level A BAdI)"
+    },
+    {
+      "name": "USEREXIT_NUMBER_RANGE",
+      "type": "USER_EXIT",
+      "include": "MV45AFZZ",
+      "program": "SAPMV45A",
+      "level": "C",
+      "module": "SD",
+      "description": "Override number range determination for sales documents. Use sparingly — number range configuration is preferred."
+    },
+    {
+      "name": "USEREXIT_ATP_QUANTITY",
+      "type": "USER_EXIT",
+      "level": "D",
+      "module": "SD",
+      "exists": false,
+      "description": "DOES NOT EXIST. Commonly hallucinated by LLMs for backorder/ATP scenarios. The real extension point is the BAdI ATP_CUST_BADI.",
+      "alternative": "ATP_CUST_BADI (Level A BAdI)"
+    },
+    {
+      "name": "USEREXIT_BACKORDER_PROCESSING",
+      "type": "USER_EXIT",
+      "level": "D",
+      "module": "SD",
+      "exists": false,
+      "description": "DOES NOT EXIST. Use ATP_CUST_BADI for backorder customizations.",
+      "alternative": "ATP_CUST_BADI"
+    },
+    {
+      "name": "EXIT_SAPMV45A_ATP",
+      "type": "CUSTOMER_EXIT",
+      "level": "D",
+      "module": "SD",
+      "exists": false,
+      "description": "DOES NOT EXIST. LLM-hallucinated exit. Use ATP_CUST_BADI.",
+      "alternative": "ATP_CUST_BADI"
+    },
+    {
+      "name": "USEREXIT_CHECK_DELIVERY",
+      "type": "USER_EXIT",
+      "level": "D",
+      "module": "SD",
+      "exists": false,
+      "description": "DOES NOT EXIST. For delivery checks, see MV50AFZ1 user exits (USEREXIT_SAVE_DOCUMENT_PREPARE in MV50AFZ1)."
+    },
+    {
+      "name": "USEREXIT_FILL_VBAK_FROM_HVBAK",
+      "type": "USER_EXIT",
+      "level": "D",
+      "module": "SD",
+      "exists": false,
+      "description": "DOES NOT EXIST. The real form is USEREXIT_FILL_VBAP_FROM_HVBAP (item-level). There is no header-level equivalent."
+    },
+    {
+      "name": "USEREXIT_PO_CHECK",
+      "type": "USER_EXIT",
+      "level": "D",
+      "module": "MM",
+      "exists": false,
+      "description": "DOES NOT EXIST. Use ME_PROCESS_PO_CUST BAdI."
+    },
+    {
+      "name": "USEREXIT_FI_DOCUMENT_CHECK",
+      "type": "USER_EXIT",
+      "level": "D",
+      "module": "FI",
+      "exists": false,
+      "description": "DOES NOT EXIST. Use ACC_DOCUMENT BAdI for FI document validation."
+    },
+    {
+      "name": "USEREXIT_CHECK_VBAP",
+      "type": "USER_EXIT",
+      "level": "B",
+      "module": "SD",
+      "description": "Developer-acknowledged SAP exit (2026-05-21T18:08:39.864Z). Confirmed by the developer as a real, released SAP object; not yet verified against the SAP Business Accelerator Hub. Treated as Level B (released, upgrade-stable) per Clean Core doctrine. Note: Developer-confirmed exit in MV45AFZB include",
+      "exists": true,
+      "developerAcknowledged": true,
+      "acknowledgedAt": "2026-05-21T18:08:39.864Z"
+    }
+  ]
+}

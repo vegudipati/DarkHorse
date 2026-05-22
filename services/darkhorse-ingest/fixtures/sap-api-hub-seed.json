@@ -1,0 +1,139 @@
+{
+  "_metadata": {
+    "sourceVersion": "sprint-2-session-1-seed",
+    "fetchedAt":     "2026-05-21T00:00:00Z",
+    "notes":         "Curated seed sample of SAP API Hub entries used to exercise the ingestion pipeline end-to-end without network access. Each entry represents a real SAP released API. The live SAP API Hub fetcher replaces this fixture in a later session once the production endpoint is pinned."
+  },
+  "entries": [
+    {
+      "name":           "I_SalesOrder",
+      "objectType":     "CDS",
+      "module":         "SD",
+      "cleanCoreLevel": "A",
+      "title":          "Released CDS interface view for sales order header",
+      "description":    "I_SalesOrder is the released interface view for sales order header data. Replaces direct SELECTs on VBAK. Provides currency-converted amounts, partner roles, and document-flow information through associations. Use this view in any read access to sales order header data.",
+      "url":            "https://api.sap.com/odata/sap/cds/I_SalesOrder",
+      "metadata":       { "replaces": "VBAK" }
+    },
+    {
+      "name":           "I_SalesOrderItem",
+      "objectType":     "CDS",
+      "module":         "SD",
+      "cleanCoreLevel": "A",
+      "title":          "Released CDS interface view for sales order items",
+      "description":    "I_SalesOrderItem is the released interface view for sales order item data. Replaces direct SELECTs on VBAP. Includes schedule lines, ATP confirmation quantities, and pricing associations.",
+      "url":            "https://api.sap.com/odata/sap/cds/I_SalesOrderItem",
+      "metadata":       { "replaces": "VBAP" }
+    },
+    {
+      "name":           "I_SalesOrderScheduleLine",
+      "objectType":     "CDS",
+      "module":         "SD",
+      "cleanCoreLevel": "A",
+      "title":          "Released CDS view for sales order schedule lines",
+      "description":    "I_SalesOrderScheduleLine is the released interface view for sales order schedule line data. Replaces direct SELECTs on VBEP. Includes confirmed quantity, requested delivery date, and ATP results.",
+      "url":            "https://api.sap.com/odata/sap/cds/I_SalesOrderScheduleLine",
+      "metadata":       { "replaces": "VBEP" }
+    },
+    {
+      "name":           "I_Product",
+      "objectType":     "CDS",
+      "module":         "MM",
+      "cleanCoreLevel": "A",
+      "title":          "Released CDS interface view for material master",
+      "description":    "I_Product is the released CDS interface view for the SAP material (formerly MARA). Use in place of direct SELECTs on MARA. Provides material descriptions in the caller's logon language and standard pricing fields.",
+      "url":            "https://api.sap.com/odata/sap/cds/I_Product",
+      "metadata":       { "replaces": "MARA" }
+    },
+    {
+      "name":           "I_PurchaseOrder",
+      "objectType":     "CDS",
+      "module":         "MM",
+      "cleanCoreLevel": "A",
+      "title":          "Released CDS interface view for purchase order header",
+      "description":    "I_PurchaseOrder is the released CDS view for purchase order header data. Replaces direct SELECTs on EKKO. Provides vendor, document type, and currency-converted totals.",
+      "url":            "https://api.sap.com/odata/sap/cds/I_PurchaseOrder",
+      "metadata":       { "replaces": "EKKO" }
+    },
+    {
+      "name":           "I_PurchaseOrderItem",
+      "objectType":     "CDS",
+      "module":         "MM",
+      "cleanCoreLevel": "A",
+      "title":          "Released CDS interface view for purchase order items",
+      "description":    "I_PurchaseOrderItem is the released CDS view for purchase order item data. Replaces direct SELECTs on EKPO. Includes account-assignment and confirmation associations.",
+      "url":            "https://api.sap.com/odata/sap/cds/I_PurchaseOrderItem",
+      "metadata":       { "replaces": "EKPO" }
+    },
+    {
+      "name":           "I_Customer",
+      "objectType":     "CDS",
+      "module":         "FI",
+      "cleanCoreLevel": "A",
+      "title":          "Released CDS interface view for customer master",
+      "description":    "I_Customer is the released CDS view for the SAP customer master (formerly KNA1). Replaces direct SELECTs on KNA1. Provides general data including address fields, industry, and account group.",
+      "url":            "https://api.sap.com/odata/sap/cds/I_Customer",
+      "metadata":       { "replaces": "KNA1" }
+    },
+    {
+      "name":           "I_Supplier",
+      "objectType":     "CDS",
+      "module":         "MM",
+      "cleanCoreLevel": "A",
+      "title":          "Released CDS interface view for supplier master",
+      "description":    "I_Supplier is the released CDS view for the SAP supplier master (formerly LFA1). Replaces direct SELECTs on LFA1. Provides general supplier data including address fields, payment terms, and account group.",
+      "url":            "https://api.sap.com/odata/sap/cds/I_Supplier",
+      "metadata":       { "replaces": "LFA1" }
+    },
+    {
+      "name":           "I_JournalEntry",
+      "objectType":     "CDS",
+      "module":         "FI",
+      "cleanCoreLevel": "A",
+      "title":          "Released CDS interface view for FI journal entry",
+      "description":    "I_JournalEntry replaces direct SELECTs on BKPF and BSEG. Provides header and item data of FI journal entries with currency conversion and document-flow associations.",
+      "url":            "https://api.sap.com/odata/sap/cds/I_JournalEntry",
+      "metadata":       { "replaces": "BKPF,BSEG" }
+    },
+    {
+      "name":           "BAPI_SALESORDER_CREATEFROMDAT2",
+      "objectType":     "BAPI",
+      "module":         "SD",
+      "cleanCoreLevel": "B",
+      "title":          "Classic BAPI for sales order creation",
+      "description":    "BAPI_SALESORDER_CREATEFROMDAT2 is the classic BAPI for creating sales orders. In an S/4HANA Cloud Public-edition context this BAPI is being replaced by the RAP Behavior Definition I_SalesOrderTP and its CREATE EML operation. Use the BAPI only when RAP is unavailable for the target object.",
+      "url":            "https://api.sap.com/api/SD_BAPI_SO_CREATE",
+      "metadata":       { "rapAlternative": "I_SalesOrderTP" }
+    },
+    {
+      "name":           "I_SalesOrderTP",
+      "objectType":     "BDEF",
+      "module":         "SD",
+      "cleanCoreLevel": "A",
+      "title":          "Released RAP behavior definition for sales order",
+      "description":    "I_SalesOrderTP is the released transactional RAP Behavior Definition for sales order header and item. Use EML CREATE / UPDATE / DELETE / READ against this BDEF instead of legacy BAPIs. Commit work via the COMMIT ENTITIES statement.",
+      "url":            "https://api.sap.com/api/SD_RAP_SO_TP",
+      "metadata":       { "replaces": "BAPI_SALESORDER_CREATEFROMDAT2" }
+    },
+    {
+      "name":           "BADI_SD_SALES_BASIC",
+      "objectType":     "BADI",
+      "module":         "SD",
+      "cleanCoreLevel": "A",
+      "title":          "Released BAdI for SD sales-order basic processing",
+      "description":    "BADI_SD_SALES_BASIC is the released enhancement spot for sales-order basic processing. Use this in place of the legacy USEREXIT_SAVE_DOCUMENT_PREPARE in MV45AFZZ. Cloud-ready, upgrade-safe, fully Clean Core Level A.",
+      "url":            "https://api.sap.com/api/SD_BADI_SALES_BASIC",
+      "metadata":       { "replaces": "USEREXIT_SAVE_DOCUMENT_PREPARE" }
+    },
+    {
+      "name":           "ATP_CUST_BADI",
+      "objectType":     "BADI",
+      "module":         "SD",
+      "cleanCoreLevel": "A",
+      "title":          "Released BAdI for ATP customer customizing",
+      "description":    "ATP_CUST_BADI is the released enhancement spot for ATP (Available-To-Promise) customer customizing. Use this when LLM output references USEREXIT_ATP_QUANTITY — that user exit does not exist; this BAdI is the real extension point.",
+      "url":            "https://api.sap.com/api/ATP_CUST_BADI",
+      "metadata":       { "replaces": "USEREXIT_ATP_QUANTITY" }
+    }
+  ]
+}

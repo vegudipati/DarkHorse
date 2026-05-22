@@ -1,0 +1,244 @@
+{
+  "_metadata": {
+    "source": "Sprint 1 seed data — curated subset of the SAP BAdI Catalog and Cloudification Repository released-BAdI list",
+    "schemaVersion": "1.0.0",
+    "updatedAt": "2026-05-21",
+    "totalEntries": 24,
+    "levelLegend": {
+      "A": "Released for cloud — public API, stable, recommended",
+      "B": "Released for on-premise — acceptable for Private Cloud / S/4 on-prem only",
+      "C": "Not released — classic BAdI, allowed only if no Level A/B alternative exists",
+      "D": "Deprecated or non-existent — never reference"
+    }
+  },
+  "badis": [
+    {
+      "name": "ME_PROCESS_PO_CUST",
+      "enhancementSpot": "ES_BADI_ME_PROCESS_PO_CUST",
+      "level": "A",
+      "module": "MM",
+      "description": "Customer-specific enhancements during purchase order processing. Released for S/4HANA Cloud and on-premise.",
+      "interface": "IF_EX_ME_PROCESS_PO_CUST",
+      "filterTypes": [],
+      "exampleUseCase": "Validate PO line items, default supplier-specific fields"
+    },
+    {
+      "name": "ME_REQ_POSTED",
+      "enhancementSpot": "ES_BADI_ME_REQ_POSTED",
+      "level": "A",
+      "module": "MM",
+      "description": "BAdI called after a purchase requisition is posted. Released cloud-ready.",
+      "interface": "IF_EX_ME_REQ_POSTED",
+      "filterTypes": []
+    },
+    {
+      "name": "BADI_SD_SALES_BASIC",
+      "enhancementSpot": "ES_BADI_SD_SALES",
+      "level": "A",
+      "module": "SD",
+      "description": "Sales document processing — header and item level customer logic. Released cloud-ready.",
+      "interface": "IF_BADI_SD_SALES_BASIC",
+      "filterTypes": [],
+      "exampleUseCase": "Default sales document fields, custom validations on sales order create/change"
+    },
+    {
+      "name": "BADI_SD_SALES_ITEM",
+      "enhancementSpot": "ES_BADI_SD_SALES",
+      "level": "A",
+      "module": "SD",
+      "description": "Item-level enhancements during sales order processing.",
+      "interface": "IF_BADI_SD_SALES_ITEM",
+      "filterTypes": []
+    },
+    {
+      "name": "ATP_CUST_BADI",
+      "enhancementSpot": "ES_BADI_ATP_CUST",
+      "level": "A",
+      "module": "SD",
+      "description": "Customer-specific extensions to ATP (Available-to-Promise) checks. Use this BAdI for backorder and ATP enhancements — NOT a USEREXIT_ATP_QUANTITY routine, which does not exist.",
+      "interface": "IF_EX_ATP_CUST_BADI",
+      "filterTypes": [],
+      "exampleUseCase": "Influence ATP quantity calculation during backorder processing"
+    },
+    {
+      "name": "BADI_SD_BILLING",
+      "enhancementSpot": "ES_BADI_SD_BILLING",
+      "level": "A",
+      "module": "SD",
+      "description": "Customer enhancements in billing document processing (header/item).",
+      "interface": "IF_BADI_SD_BILLING",
+      "filterTypes": []
+    },
+    {
+      "name": "FAGL_DERIVE_SEGMENT",
+      "enhancementSpot": "ES_FAGL_DERIVE_SEGMENT",
+      "level": "A",
+      "module": "FI",
+      "description": "Derive segment characteristic in New GL postings. Released cloud-ready.",
+      "interface": "IF_EX_FAGL_DERIVE_SEGMENT",
+      "filterTypes": []
+    },
+    {
+      "name": "ACC_DOCUMENT",
+      "enhancementSpot": "ES_BADI_ACC_DOCUMENT",
+      "level": "A",
+      "module": "FI",
+      "description": "BAdI for influencing accounting document creation. Released cloud-ready.",
+      "interface": "IF_EX_ACC_DOCUMENT",
+      "filterTypes": ["BUS_OBJECT"]
+    },
+    {
+      "name": "AC_DOCUMENT",
+      "enhancementSpot": "ES_BADI_AC_DOCUMENT",
+      "level": "A",
+      "module": "FI",
+      "description": "Accounting document influence at posting time. Released cloud-ready.",
+      "interface": "IF_EX_AC_DOCUMENT",
+      "filterTypes": []
+    },
+    {
+      "name": "BADI_MATERIAL_CHECK",
+      "enhancementSpot": "ES_BADI_MATERIAL_CHECK",
+      "level": "A",
+      "module": "MM",
+      "description": "Material master validation BAdI — released cloud-ready.",
+      "interface": "IF_EX_BADI_MATERIAL_CHECK",
+      "filterTypes": []
+    },
+    {
+      "name": "BUPA_FURTHER_CHECKS",
+      "enhancementSpot": "ES_BUPA_FURTHER_CHECKS",
+      "level": "A",
+      "module": "BP",
+      "description": "Business Partner additional validation checks. Released cloud-ready.",
+      "interface": "IF_EX_BUPA_FURTHER_CHECKS",
+      "filterTypes": []
+    },
+    {
+      "name": "WORKORDER_UPDATE",
+      "enhancementSpot": "ES_WORKORDER_UPDATE",
+      "level": "B",
+      "module": "PP",
+      "description": "Production order update BAdI — released for on-premise S/4HANA only.",
+      "interface": "IF_EX_WORKORDER_UPDATE",
+      "filterTypes": [],
+      "notes": "For S/4HANA Cloud, use the PP RAP Behavior Definition instead."
+    },
+    {
+      "name": "BADI_FDCB_SUBBAS01",
+      "enhancementSpot": "ES_BADI_FDCB_SUBBAS01",
+      "level": "B",
+      "module": "FI",
+      "description": "Enjoy transactions screen subscreen BAdI. Released for on-premise — limited cloud applicability.",
+      "interface": "IF_EX_BADI_FDCB_SUBBAS01",
+      "filterTypes": []
+    },
+    {
+      "name": "ME_GUI_PO_CUST",
+      "enhancementSpot": "ES_BADI_ME_GUI_PO_CUST",
+      "level": "B",
+      "module": "MM",
+      "description": "PO screen layout BAdI — UI-side enhancement. Released for on-premise; Fiori uses different extension model.",
+      "interface": "IF_EX_ME_GUI_PO_CUST",
+      "filterTypes": []
+    },
+    {
+      "name": "BADI_SD_V46H0001",
+      "enhancementSpot": "ES_BADI_SD_V46H0001",
+      "level": "B",
+      "module": "SD",
+      "description": "Classic SD pricing BAdI — released for on-premise.",
+      "interface": "IF_EX_BADI_SD_V46H0001",
+      "filterTypes": []
+    },
+    {
+      "name": "BADI_GET_ACCOUNT_GROUP",
+      "enhancementSpot": "ES_BADI_GET_ACCOUNT_GROUP",
+      "level": "C",
+      "module": "FI",
+      "description": "Classic BAdI for vendor account group determination — NOT released for cloud. Use ACC_DOCUMENT for cloud-eligible scenarios.",
+      "interface": "IF_EX_BADI_GET_ACCOUNT_GROUP",
+      "filterTypes": [],
+      "alternative": "ACC_DOCUMENT (Level A)"
+    },
+    {
+      "name": "MB_DOCUMENT_BADI",
+      "enhancementSpot": "ES_MB_DOCUMENT_BADI",
+      "level": "C",
+      "module": "MM",
+      "description": "Material document BAdI — classic, not released for cloud. Prefer MIGO_BADI or material movement RAP behaviors.",
+      "interface": "IF_EX_MB_DOCUMENT_BADI",
+      "filterTypes": [],
+      "alternative": "MIGO_BADI (Level B) or RAP behavior /SCMB/I_GoodsMovement (Level A)"
+    },
+    {
+      "name": "WORKORDER_GOODSMVT",
+      "enhancementSpot": "ES_WORKORDER_GOODSMVT",
+      "level": "C",
+      "module": "PP",
+      "description": "Goods movement during production order confirmation — classic only.",
+      "interface": "IF_EX_WORKORDER_GOODSMVT",
+      "filterTypes": []
+    },
+    {
+      "name": "USEREXIT_ATP_QUANTITY",
+      "enhancementSpot": null,
+      "level": "D",
+      "module": "SD",
+      "description": "DOES NOT EXIST. This is a commonly hallucinated name produced by LLMs. The real extension point for ATP customization is the BAdI ATP_CUST_BADI (Level A).",
+      "interface": null,
+      "exists": false,
+      "alternative": "ATP_CUST_BADI"
+    },
+    {
+      "name": "BADI_VBAK_CHECK",
+      "enhancementSpot": null,
+      "level": "D",
+      "module": "SD",
+      "description": "DOES NOT EXIST. Commonly hallucinated BAdI name. Use BADI_SD_SALES_BASIC for sales order header validation.",
+      "interface": null,
+      "exists": false,
+      "alternative": "BADI_SD_SALES_BASIC"
+    },
+    {
+      "name": "MM_PO_VALIDATE",
+      "enhancementSpot": null,
+      "level": "D",
+      "module": "MM",
+      "description": "DOES NOT EXIST. Use ME_PROCESS_PO_CUST instead.",
+      "interface": null,
+      "exists": false,
+      "alternative": "ME_PROCESS_PO_CUST"
+    },
+    {
+      "name": "BADI_FI_POSTING",
+      "enhancementSpot": null,
+      "level": "D",
+      "module": "FI",
+      "description": "DOES NOT EXIST. Use ACC_DOCUMENT for influencing accounting document postings.",
+      "interface": null,
+      "exists": false,
+      "alternative": "ACC_DOCUMENT"
+    },
+    {
+      "name": "BADI_BACKORDER_PROCESS",
+      "enhancementSpot": null,
+      "level": "D",
+      "module": "SD",
+      "description": "DOES NOT EXIST. For backorder processing, use ATP_CUST_BADI.",
+      "interface": null,
+      "exists": false,
+      "alternative": "ATP_CUST_BADI"
+    },
+    {
+      "name": "BADI_PRICING_ENHANCEMENT",
+      "enhancementSpot": null,
+      "level": "D",
+      "module": "SD",
+      "description": "DOES NOT EXIST. For pricing, use BADI_SD_V46H0001 (Level B, on-prem) or condition technique routines.",
+      "interface": null,
+      "exists": false,
+      "alternative": "BADI_SD_V46H0001"
+    }
+  ]
+}

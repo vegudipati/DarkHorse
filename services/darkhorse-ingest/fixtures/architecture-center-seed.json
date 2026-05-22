@@ -1,0 +1,99 @@
+{
+  "_metadata": {
+    "sourceVersion": "sprint-2-session-3-seed",
+    "fetchedAt":     "2026-05-21T00:00:00Z",
+    "notes":         "Curated extract of priority reference architectures from the SAP Architecture Center (architecture.learning.sap.com). The 6 priority documents from the CPI-6 spec are included verbatim, plus a small set of widely-referenced patterns. The live Puppeteer fetcher (ArchitectureCenterFetcher live=true) replaces this fixture by rendering /docs/ref-arch/<id> pages with headless Chrome."
+  },
+  "entries": [
+    {
+      "patternId":      "AGENTIC_AI_AGENTS",
+      "title":          "Agentic AI and AI Agents on SAP BTP",
+      "module":         "AI",
+      "cleanCoreLevel": "A",
+      "description":    "Reference architecture for agentic AI workloads on SAP BTP. Defines the canonical pattern for hosting AI agents that orchestrate SAP processes: agents run on BTP, communicate with S/4HANA exclusively through released APIs (OData, RAP, Events) and BTP Joule services, and never modify the digital core. Use this pattern as the target architecture when DarkHorse or any related agentic system integrates with SAP. Implementation components: SAP AI Core, SAP AI Launchpad, BTP Destinations, BTP Authorization & Trust Management.",
+      "url":            "https://architecture.learning.sap.com/docs/ref-arch/ca1d2a3e",
+      "metadata":       { "domain": "ai-agents", "spec-priority": 1 }
+    },
+    {
+      "patternId":      "GENAI_BTP",
+      "title":          "Generative AI on SAP BTP",
+      "module":         "AI",
+      "cleanCoreLevel": "A",
+      "description":    "Reference architecture for generative-AI workloads on SAP BTP. Defines model hosting (SAP AI Core deployments), prompt orchestration via SAP Generative AI Hub, retrieval-augmented generation pattern, and integration with S/4HANA through released APIs. Includes guardrails for data privacy and grounding via Joule and BTP-hosted RAG indexes. Use this pattern when designing any GenAI feature that needs to ground its outputs in SAP data.",
+      "url":            "https://architecture.learning.sap.com/docs/ref-arch/e5eb3b9b1d",
+      "metadata":       { "domain": "ai-generative", "spec-priority": 1 }
+    },
+    {
+      "patternId":      "A2A_INTEGRATION",
+      "title":          "Application-to-Application Integration on SAP BTP",
+      "module":         "INTEGRATION",
+      "cleanCoreLevel": "A",
+      "description":    "Reference architecture for synchronous and asynchronous A2A integration. Synchronous: SAP Integration Suite (Cloud Integration / Open Connectors) facing OData / SOAP endpoints. Asynchronous: SAP Event Mesh and event-driven integration with the S/4HANA Event Channel. Avoids direct point-to-point connections and IDoc-only flows where Clean Core APIs exist. Use this pattern for any integration design between SAP and non-SAP applications.",
+      "url":            "https://architecture.learning.sap.com/docs/ref-arch/58f6d88e9a",
+      "metadata":       { "domain": "integration", "spec-priority": 1 }
+    },
+    {
+      "patternId":      "DEVOPS_BTP",
+      "title":          "DevOps with SAP BTP",
+      "module":         "DEVOPS",
+      "cleanCoreLevel": "A",
+      "description":    "Reference architecture for DevOps on SAP BTP. Covers Continuous Integration pipelines for ABAP RAP / CAP / Build Apps via Project Piper, Cloud ALM, SAP Continuous Integration & Delivery service. Defines the canonical pattern for transports, test orchestration, and quality gates. Use this pattern when defining the build and deployment story for DarkHorse-generated code.",
+      "url":            "https://architecture.learning.sap.com/docs/ref-arch/1c5706feb5",
+      "metadata":       { "domain": "devops", "spec-priority": 1 }
+    },
+    {
+      "patternId":      "NETWEAVER_TRANSITION",
+      "title":          "Transitioning Architectures from SAP NetWeaver",
+      "module":         "TRANSITION",
+      "cleanCoreLevel": "A",
+      "description":    "Reference architecture for moving from SAP NetWeaver-based custom development to Clean Core compliant S/4HANA. Defines the migration path: identify Level C/D modifications, classify against Cloudification Repository, rewrite as side-by-side BTP extensions or in-app extensions, and decommission. Use this pattern as the playbook when DarkHorse must analyze legacy ABAP code for re-platforming.",
+      "url":            "https://architecture.learning.sap.com/docs/ref-arch/9a5f7b59dc",
+      "metadata":       { "domain": "migration", "spec-priority": 1 }
+    },
+    {
+      "patternId":      "BUILD_PROCESS_AUTOMATION",
+      "title":          "Integrate and Extend with SAP Build Process Automation",
+      "module":         "AUTOMATION",
+      "cleanCoreLevel": "A",
+      "description":    "Reference architecture for low-code process automation on top of SAP using SAP Build Process Automation (BPA). Defines patterns for orchestrating cross-application workflows, automating manual tasks via RPA bots, and exposing automations as triggered services. Always sits side-by-side on BTP — never modifies the digital core. Use this pattern when DarkHorse proposes a process-automation solution rather than custom ABAP.",
+      "url":            "https://architecture.learning.sap.com/docs/ref-arch/99fd0564be",
+      "metadata":       { "domain": "automation", "spec-priority": 1 }
+    },
+    {
+      "patternId":      "EXTEND_S4HANA_SIDE_BY_SIDE",
+      "title":          "Extending S/4HANA with side-by-side apps on BTP",
+      "module":         "EXTENSIBILITY",
+      "cleanCoreLevel": "A",
+      "description":    "Reference architecture for side-by-side extensions on SAP BTP. Defines how a new app on BTP (CAP, RAP-on-BTP, or Build Apps) consumes S/4HANA released APIs, persists its own data on HANA Cloud, and surfaces in Fiori Launchpad via the Work Zone. The canonical pattern for any net-new functionality where in-app extensibility is insufficient. Use this architecture for greenfield extensions identified during SO/FDS design.",
+      "url":            "https://architecture.learning.sap.com/docs/ref-arch/extend-s4-side-by-side",
+      "metadata":       { "domain": "extensibility" }
+    },
+    {
+      "patternId":      "EVENT_DRIVEN_ARCH",
+      "title":          "Event-driven architecture with SAP Event Mesh",
+      "module":         "INTEGRATION",
+      "cleanCoreLevel": "A",
+      "description":    "Reference architecture for event-driven integration using SAP Event Mesh and the S/4HANA Event Channel. Defines producers (S/4HANA business events, CAP services), brokers (Event Mesh), and consumers (BTP apps, third-party). Use this pattern when a synchronous A2A pattern would introduce tight coupling or blocking — for example, when DarkHorse needs to notify external systems about pipeline-stage completions.",
+      "url":            "https://architecture.learning.sap.com/docs/ref-arch/event-driven",
+      "metadata":       { "domain": "integration" }
+    },
+    {
+      "patternId":      "CAP_ON_BTP",
+      "title":          "Building applications with CAP on SAP BTP",
+      "module":         "EXTENSIBILITY",
+      "cleanCoreLevel": "A",
+      "description":    "Reference architecture for SAP Cloud Application Programming model (CAP) apps deployed on Cloud Foundry or Kyma. Defines CDS-based modeling, service exposure (OData V4), Fiori UI integration, authentication via XSUAA, and consumption of S/4HANA released APIs. The preferred stack for net-new side-by-side apps that need a programming-language choice (Node.js / Java) beyond ABAP.",
+      "url":            "https://architecture.learning.sap.com/docs/ref-arch/cap-on-btp",
+      "metadata":       { "domain": "extensibility" }
+    },
+    {
+      "patternId":      "RAP_ON_S4HANA",
+      "title":          "RAP on S/4HANA — the canonical pattern for in-app transactional development",
+      "module":         "EXTENSIBILITY",
+      "cleanCoreLevel": "A",
+      "description":    "Reference architecture for ABAP RESTful Application Programming Model on S/4HANA Cloud and Private editions. Defines the layered structure: Data Model (CDS), Behavior Definition (BDEF), Behavior Implementation (BBEH class), Service Definition (SRVD), Service Binding (UI / OData), and EML for all writes. Use this pattern when DarkHorse generates any new transactional object — the TDS object list must contain CDS+BDEF+BBEH+SRVD, not classic PROG/FUGR.",
+      "url":            "https://architecture.learning.sap.com/docs/ref-arch/rap-on-s4hana",
+      "metadata":       { "domain": "extensibility" }
+    }
+  ]
+}
