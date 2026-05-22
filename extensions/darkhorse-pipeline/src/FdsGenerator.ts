@@ -10,6 +10,7 @@ import {
   renderFdsGroundingForPrompt,
   FdsGroundingContext
 } from './FdsAgentGrounder';
+import { renderStandardsForPrompt } from './StandardsLoader';
 
 export interface FdsSection {
   businessBackground: string;
@@ -187,7 +188,10 @@ export class FdsGenerator {
       : '';
     const groundingSection = groundingBlock ? `\n\n${groundingBlock}\n` : '';
 
-    return `Generate a detailed, professional Functional Design Specification for this SAP ${ricefwType} development. This document will be reviewed by senior SAP consultants and must be production-quality.
+    const standardsBlock   = renderStandardsForPrompt();
+    const standardsSection = standardsBlock ? `${standardsBlock}\n\n` : '';
+
+    return `${standardsSection}Generate a detailed, professional Functional Design Specification for this SAP ${ricefwType} development. This document will be reviewed by senior SAP consultants and must be production-quality.
 
 BUSINESS REQUIREMENT:
 ${brText}

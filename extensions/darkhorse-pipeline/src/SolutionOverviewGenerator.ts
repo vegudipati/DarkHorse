@@ -7,6 +7,7 @@ import {
   renderSoGroundingForPrompt,
   SoGroundingContext
 } from './SoAgentGrounder';
+import { renderStandardsForPrompt } from './StandardsLoader';
 
 export class SolutionOverviewGenerator {
 
@@ -87,7 +88,10 @@ export class SolutionOverviewGenerator {
       : '';
     const groundingSection = groundingBlock ? `\n\n${groundingBlock}\n` : '';
 
-    return `Analyze this SAP ${ricefwType} Business Requirement and generate a Solution Overview with Clean Core compliance assessment.
+    const standardsBlock   = renderStandardsForPrompt();
+    const standardsSection = standardsBlock ? `${standardsBlock}\n\n` : '';
+
+    return `${standardsSection}Analyze this SAP ${ricefwType} Business Requirement and generate a Solution Overview with Clean Core compliance assessment.
 
 BUSINESS REQUIREMENT:
 ${brText.substring(0, 2000)}

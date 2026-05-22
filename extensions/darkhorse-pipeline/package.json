@@ -2,7 +2,7 @@
   "name": "darkhorse-pipeline",
   "displayName": "DarkHorse Pipeline",
   "description": "BR → FDS → TDS → Code pipeline for SAP RICEFW development",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "publisher": "deloitte-darkhorse",
   "engines": {
     "vscode": "^1.85.0"
@@ -60,6 +60,10 @@
       {
         "command": "darkhorse.pipeline.verifyAiLog",
         "title": "DarkHorse: Verify AI Log Chain"
+      },
+      {
+        "command": "darkhorse.pipeline.openClientStandards",
+        "title": "DarkHorse: Open Client Standards File"
       }
     ],
     "configuration": {
@@ -114,6 +118,16 @@
           "type": "string",
           "default": "",
           "description": "Absolute path to the tamper-evident AI generation audit log. Each AI-generated object appends one JSONL entry containing the 16-hex DarkHorse UID, model, timestamp, and prevHash (SHA-256 of the previous line). When blank, defaults to <userHome>/.darkhorse/ai-generation-log.jsonl. Environment variable DARKHORSE_UID_LOG overrides both."
+        },
+        "darkhorse.client.id": {
+          "type": "string",
+          "default": "",
+          "description": "Human label for the client whose standards apply to this workspace (e.g. 'ACME-NA'). Appears in the prompt header and in the AI audit log."
+        },
+        "darkhorse.client.standardsFile": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to a Markdown file containing client-specific development standards (naming conventions, authorization patterns, logging objects, transport policy, etc.). DarkHorse injects this file verbatim at the top of every LLM prompt across the pipeline. Changes are hot-reloaded on save. Use the command 'DarkHorse: Open Client Standards File' to open or create the file from a starter template."
         }
       }
     }

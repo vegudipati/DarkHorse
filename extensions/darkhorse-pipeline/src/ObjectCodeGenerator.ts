@@ -24,9 +24,10 @@ import {
   applyCdsAutoFix,
   AutoFixSummary
 } from './CleanCoreAutoFix';
-import { recordGeneration } from './UidLogger';
-import { applyHeader }      from './HeaderEmitter';
-import * as crypto          from 'crypto';
+import { recordGeneration }       from './UidLogger';
+import { applyHeader }            from './HeaderEmitter';
+import { renderStandardsForPrompt } from './StandardsLoader';
+import * as crypto                from 'crypto';
 
 export class ObjectCodeGenerator {
 
@@ -450,6 +451,9 @@ export class ObjectCodeGenerator {
       ? `\n\n${groundingBlock}\n`
       : '';
 
+    const standardsBlock   = renderStandardsForPrompt();
+    const standardsSection = standardsBlock ? `${standardsBlock}\n\n` : '';
+
     const ackSection = acknowledgements.length === 0 ? '' : `
 
 ## Developer Acknowledgements
@@ -462,7 +466,7 @@ ${acknowledgements.map(a => `- ${a} (developer-acknowledged valid SAP object)`).
 Use the acknowledged names exactly as written. Do not invent variant names.
 `;
 
-    return `Generate complete, production-ready ABAP code for this SAP object.
+    return `${standardsSection}Generate complete, production-ready ABAP code for this SAP object.
 
 Object Details:
 - Type: ${obj.objectType}

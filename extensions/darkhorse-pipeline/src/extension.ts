@@ -110,6 +110,16 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Command: Open / create client standards file — CPI-6 item 3.
+  // Opens darkhorse.client.standardsFile in the editor. If the file does not
+  // exist, prompts to create it from a starter Markdown template.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.openClientStandards', async () => {
+      const { runOpenClientStandardsCommand } = require('./StandardsLoader');
+      await runOpenClientStandardsCommand();
+    })
+  );
+
   // Command: Verify AI Log Chain — CPI-6 audit-log integrity check.
   // Walks ~/.darkhorse/ai-generation-log.jsonl line by line and confirms
   // every prevHash matches the SHA-256 of the previous line. Any break

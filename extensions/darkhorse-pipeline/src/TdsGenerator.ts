@@ -11,6 +11,7 @@ import {
   renderTdsGroundingForPrompt,
   TdsGroundingContext
 } from './TdsAgentGrounder';
+import { renderStandardsForPrompt } from './StandardsLoader';
 
 export { TdsDocument };
 
@@ -133,7 +134,10 @@ private static buildPrompt(
       : '';
     const groundingSection = groundingBlock ? `\n\n${groundingBlock}\n` : '';
 
-    return `Generate a detailed Technical Design Specification for this SAP ${ricefwType} development.
+    const standardsBlock   = renderStandardsForPrompt();
+    const standardsSection = standardsBlock ? `${standardsBlock}\n\n` : '';
+
+    return `${standardsSection}Generate a detailed Technical Design Specification for this SAP ${ricefwType} development.
 
 APPROVED FDS SUMMARY:
 Title: ${fds.title}
