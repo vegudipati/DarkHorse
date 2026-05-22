@@ -24,6 +24,9 @@ import {
   applyCdsAutoFix,
   AutoFixSummary
 } from './CleanCoreAutoFix';
+import { recordGeneration } from './UidLogger';
+import { applyHeader }      from './HeaderEmitter';
+import * as crypto          from 'crypto';
 
 export class ObjectCodeGenerator {
 
@@ -104,9 +107,11 @@ export class ObjectCodeGenerator {
     const proxyPort = config.get<number>('darkhorse.pipeline.llmProxyPort', 47291);
     const totalObjects = stateManager.getState()?.abapObjects.length ?? 1;
 
+    const pipelineTitle = stateManager.getState()?.title ?? 'DarkHorse Pipeline';
+
     // First-pass generation with no acknowledgements.
     const first = await ObjectCodeGenerator.generateOnce(
-      obj, tdsDoc, index, proxyPort, totalObjects, []
+      obj, tdsDoc, index, proxyPort, totalObjects, [], pipelineTitle
     );
     if (!first.code) {
       return false;
@@ -118,7 +123,7 @@ export class ObjectCodeGenerator {
       obj, first.code, stateManager, first.report, first.review, first.autoFix,
       async (acks: string[]) => {
         return ObjectCodeGenerator.generateOnce(
-          obj, tdsDoc, index, proxyPort, totalObjects, acks
+          obj, tdsDoc, index, proxyPort, totalObjects, acks, pipelineTitle
         );
       }
     );
@@ -136,7 +141,8 @@ export class ObjectCodeGenerator {
     index: number,
     proxyPort: number,
     totalObjects: number,
-    acknowledgements: readonly string[]
+    acknowledgements: readonly string[],
+    pipelineTitle: string
   ): Promise<{ code: string; report?: CleanCoreReport; review?: ReviewReport; autoFix?: AutoFixSummary }> {
 
     const ackSuffix = acknowledgements.length > 0
@@ -144,6 +150,8 @@ export class ObjectCodeGenerator {
       : '';
 
     let generatedCode = '';
+    let usedModel     = 'unknown';
+    let promptText    = '';
 
     await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
@@ -161,15 +169,17 @@ export class ObjectCodeGenerator {
 
       progress.report({ message: 'Calling AI...' });
       try {
-        const prompt = ObjectCodeGenerator.buildPrompt(
+        promptText = ObjectCodeGenerator.buildPrompt(
           obj, tdsDoc, index, groundingContext, acknowledgements
         );
-        generatedCode = await ObjectCodeGenerator.callProxy(proxyPort, {
-          prompt,
+        const result = await ObjectCodeGenerator.callProxy(proxyPort, {
+          prompt:       promptText,
           systemPrompt: ObjectCodeGenerator.getSystemPrompt(),
-          maxTokens: 2000,
-          sessionId: `code-${obj.objectName}-${Date.now()}`
+          maxTokens:    2000,
+          sessionId:    `code-${obj.objectName}-${Date.now()}`
         });
+        generatedCode = result.code;
+        usedModel     = result.model;
         progress.report({ message: 'Done.' });
       } catch (err: any) {
         vscode.window.showErrorMessage(
@@ -187,6 +197,29 @@ export class ObjectCodeGenerator {
       .replace(/```abap/gi, '')
       .replace(/```/g, '')
       .trim();
+
+    // CPI-6 — emit a 16-hex DarkHorse UID, append the audit log entry to the
+    // tamper-evident chain, then prepend the canonical header comment block.
+    // Any LLM-emitted header is stripped first so we never double up.
+    const promptHash = crypto.createHash('sha256')
+      .update(promptText, 'utf8').digest('hex');
+    const audit = recordGeneration({
+      objectName: obj.objectName,
+      objectType: obj.objectType,
+      model:      usedModel,
+      pipelineId: pipelineTitle,
+      brRef:      pipelineTitle,
+      promptHash
+    });
+    generatedCode = applyHeader(generatedCode, {
+      obj,
+      uid:           audit.uid,
+      timestamp:     audit.timestamp,
+      model:         usedModel,
+      pipelineTitle,
+      brRef:         pipelineTitle,
+      version:       '1.0'
+    });
 
     // Post-generation in parallel:
     //   - CleanCoreVerifier  (deterministic regex + MCP catalog lookup)
@@ -580,8 +613,13 @@ CALL FUNCTION 'BAL_DB_SAVE'
 \`\`\`
 
 # Output format
-Return ONLY the ABAP source code. No markdown fences. No explanation outside ABAP comments.
-Start with REPORT, CLASS ... DEFINITION, INTERFACE, or whatever object type the TDS requested.`;
+Return ONLY the ABAP / CDS / DDL source code. No markdown fences. No explanation outside source comments.
+Start directly with the source declaration: REPORT, CLASS ... DEFINITION, INTERFACE, "define view ...", "managed implementation ...", or whatever the TDS objectType requires.
+
+# Header policy — important
+DO NOT emit a top-of-file header comment block describing the object (Object Name / Function / Business Purpose / Model / UID etc.). DarkHorse appends a deterministic, audit-grade header AFTER your generation that includes the AI model name, generation timestamp, and a 16-hex tamper-evident UID linked to a per-developer audit log. Any header you write will be stripped and replaced.
+
+Inline comments inside the BODY of the code remain REQUIRED — explain non-obvious logic, name SAP authorization checks, mark validation / determination boundaries, document EML side effects, and call out the WHY (not just the WHAT) for any business rule.`;
   }
 
   private static escapeHtml(s: string): string {
@@ -1121,7 +1159,7 @@ Start with REPORT, CLASS ... DEFINITION, INTERFACE, or whatever object type the 
 </html>`;
   }
 
-  private static callProxy(port: number, body: object): Promise<string> {
+  private static callProxy(port: number, body: object): Promise<{ code: string; model: string }> {
     return new Promise((resolve, reject) => {
       const http = require('http');
       const payload = JSON.stringify(body);
@@ -1148,9 +1186,12 @@ Start with REPORT, CLASS ... DEFINITION, INTERFACE, or whatever object type the 
               reject(new Error(parsed.error ?? `Proxy error: ${res.statusCode}`));
               return;
             }
-            resolve(parsed.code ?? parsed.content ?? '');
+            resolve({
+              code:  parsed.code ?? parsed.content ?? '',
+              model: parsed.model ?? 'unknown'
+            });
           } catch {
-            resolve(data);
+            resolve({ code: data, model: 'unknown' });
           }
         });
       });

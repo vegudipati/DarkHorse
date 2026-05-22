@@ -2,7 +2,7 @@
   "name": "darkhorse-pipeline",
   "displayName": "DarkHorse Pipeline",
   "description": "BR → FDS → TDS → Code pipeline for SAP RICEFW development",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "publisher": "deloitte-darkhorse",
   "engines": {
     "vscode": "^1.85.0"
@@ -56,6 +56,10 @@
       {
         "command": "darkhorse.pipeline.captureCorrections",
         "title": "DarkHorse: Capture Corrections"
+      },
+      {
+        "command": "darkhorse.pipeline.verifyAiLog",
+        "title": "DarkHorse: Verify AI Log Chain"
       }
     ],
     "configuration": {
@@ -105,6 +109,11 @@
           "type": "string",
           "default": "text-embedding-3-small",
           "description": "Name of the Azure OpenAI deployment hosting the embedding model. Must match the deployment created in the Azure portal."
+        },
+        "darkhorse.uid.logPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the tamper-evident AI generation audit log. Each AI-generated object appends one JSONL entry containing the 16-hex DarkHorse UID, model, timestamp, and prevHash (SHA-256 of the previous line). When blank, defaults to <userHome>/.darkhorse/ai-generation-log.jsonl. Environment variable DARKHORSE_UID_LOG overrides both."
         }
       }
     }

@@ -110,6 +110,18 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Command: Verify AI Log Chain — CPI-6 audit-log integrity check.
+  // Walks ~/.darkhorse/ai-generation-log.jsonl line by line and confirms
+  // every prevHash matches the SHA-256 of the previous line. Any break
+  // means the log was edited outside DarkHorse and the chain is no longer
+  // tamper-evident.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.verifyAiLog', async () => {
+      const { runVerifyAiLogCommand } = require('./UidLogger');
+      await runVerifyAiLogCommand();
+    })
+  );
+
   // Command: Clear pipeline
   context.subscriptions.push(
     vscode.commands.registerCommand('darkhorse.pipeline.clearPipeline', async () => {
