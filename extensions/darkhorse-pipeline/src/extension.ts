@@ -113,10 +113,50 @@ export function activate(context: vscode.ExtensionContext) {
   // Command: Open / create client standards file — CPI-6 item 3.
   // Opens darkhorse.client.standardsFile in the editor. If the file does not
   // exist, prompts to create it from a starter Markdown template.
+  // Wrapped in try/catch with explicit error toast so handler failures
+  // (bad path, permission, etc.) surface instead of silently swallowing.
   context.subscriptions.push(
     vscode.commands.registerCommand('darkhorse.pipeline.openClientStandards', async () => {
-      const { runOpenClientStandardsCommand } = require('./StandardsLoader');
-      await runOpenClientStandardsCommand();
+      try {
+        const { runOpenClientStandardsCommand } = require('./StandardsLoader');
+        await runOpenClientStandardsCommand();
+      } catch (err: any) {
+        const message = err?.message ?? String(err);
+        console.error('DarkHorse: openClientStandards failed:', err);
+        vscode.window.showErrorMessage(
+          `DarkHorse: Open Client Standards failed — ${message}`
+        );
+      }
+    })
+  );
+
+  // Command: Discover Template Headings — CPI-6 item 4.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.discoverTemplateHeadings', async () => {
+      try {
+        const { runDiscoverTemplateHeadingsCommand } = require('./TemplateDiscovery');
+        await runDiscoverTemplateHeadingsCommand();
+      } catch (err: any) {
+        console.error('DarkHorse: discoverTemplateHeadings failed:', err);
+        vscode.window.showErrorMessage(
+          `DarkHorse: Discover Template Headings failed — ${err?.message ?? err}`
+        );
+      }
+    })
+  );
+
+  // Command: Open Templates Config — CPI-6 item 4.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.openTemplatesConfig', async () => {
+      try {
+        const { runOpenTemplatesConfigCommand } = require('./TemplateConfig');
+        await runOpenTemplatesConfigCommand();
+      } catch (err: any) {
+        console.error('DarkHorse: openTemplatesConfig failed:', err);
+        vscode.window.showErrorMessage(
+          `DarkHorse: Open Templates Config failed — ${err?.message ?? err}`
+        );
+      }
     })
   );
 

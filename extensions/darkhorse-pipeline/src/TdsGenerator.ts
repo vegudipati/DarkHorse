@@ -12,6 +12,8 @@ import {
   TdsGroundingContext
 } from './TdsAgentGrounder';
 import { renderStandardsForPrompt } from './StandardsLoader';
+import { resolveTemplate }           from './TemplateConfig';
+import { renderIntoTemplateFile }    from './TemplateRenderer';
 
 export { TdsDocument };
 
@@ -94,7 +96,25 @@ export class TdsGenerator {
         // Write .docx
         const fileName = `${state.title.replace(/[^a-zA-Z0-9]/g, '_')}_TDS_v1_0.docx`;
         const filePath = path.join(outputFolder, fileName);
-        await DocxWriter.writeTds(tdsDoc, filePath);
+
+        const tpl = resolveTemplate(state.ricefwType, 'tds');
+        if (tpl) {
+          try {
+            const fields = TdsGenerator.flattenForTemplate(tdsDoc);
+            const result = renderIntoTemplateFile(tpl, fields, filePath);
+            console.log(
+              `[DarkHorse] TDS rendered into client template: ${result.replacedCount} sections filled, ` +
+              `${result.unmappedFields.length} fields unmapped, ${result.missingHeadings.length} headings missing data`
+            );
+          } catch (err: any) {
+            vscode.window.showWarningMessage(
+              `DarkHorse: Client TDS template render failed — falling back to generic format. ${err?.message ?? err}`
+            );
+            await DocxWriter.writeTds(tdsDoc, filePath);
+          }
+        } else {
+          await DocxWriter.writeTds(tdsDoc, filePath);
+        }
 
         // Save to state
         await stateManager.markTdsGenerated(JSON.stringify(tdsDoc), filePath, abapObjects);
@@ -294,6 +314,43 @@ CORRECT abapObjectList (Clean Core Level A):
 - CBO transparent tables: Z<Entity>
 
 Return ONLY valid JSON. No markdown fences. No preamble. No explanation.`;
+  }
+
+  /**
+   * Flatten a TdsDocument into a string-only map for the template renderer.
+   * Field names match the keys used in templates-config heading mappings.
+   */
+  private static flattenForTemplate(tds: TdsDocument): Record<string, string> {
+    const s: any = tds.sections ?? {};
+    const renderObjects = (arr: any[] | undefined): string =>
+      (arr ?? []).map((o, idx) => {
+        const seq   = o.sequence ?? (idx + 1);
+        const type  = o.objectType ?? '?';
+        const name  = o.objectName ?? '?';
+        const desc  = o.description ?? '';
+        const logic = Array.isArray(o.keyLogic) ? o.keyLogic.map((l: string, i: number) => `  ${i + 1}. ${l}`).join('\n') : '';
+        const deps  = Array.isArray(o.dependencies) ? o.dependencies.join(', ') : '';
+        return `#${seq} [${type}] ${name} — ${desc}\nDependencies: ${deps}\n${logic}`;
+      }).join('\n\n');
+
+    const renderTests = (arr: any[] | undefined): string =>
+      (arr ?? []).map((t: any) =>
+        `${t.id ?? ''}: ${t.description ?? ''} (expected: ${t.expected ?? ''})`
+      ).join('\n');
+
+    return {
+      technicalApproach: s.technicalApproach ?? '',
+      designDecisions:   Array.isArray(s.designDecisions) ? s.designDecisions.join('\n') : (s.designDecisions ?? ''),
+      abapObjectList:    renderObjects(s.abapObjectList),
+      dataDictionary:    s.dataDictionary ?? '',
+      programLogic:      s.programLogic ?? '',
+      interfaceDesign:   s.interfaceDesign ?? '',
+      dbDesign:          s.dbDesign ?? '',
+      errorHandling:     s.errorHandling ?? '',
+      transportStrategy: s.transportStrategy ?? '',
+      testScenarios:     renderTests(s.testScenarios),
+      openItems:         Array.isArray(s.openItems) ? s.openItems.join('\n') : (s.openItems ?? '')
+    };
   }
 
   private static parseResponse(raw: string, state: any, fds: FdsDocument, solutionOverview?: any): TdsDocument {

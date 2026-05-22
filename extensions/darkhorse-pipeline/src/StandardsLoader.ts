@@ -224,29 +224,45 @@ const STARTER_TEMPLATE = `# Client Development Standards
 `;
 
 export async function runOpenClientStandardsCommand(): Promise<void> {
+  console.log('[DarkHorse] openClientStandards: command invoked');
+
   const configured = resolveStandardsFilePath();
+  console.log('[DarkHorse] openClientStandards: configured path =', JSON.stringify(configured));
+
   if (!configured) {
-    const choice = await vscode.window.showInformationMessage(
-      'DarkHorse: darkhorse.client.standardsFile is not set. Open settings to configure it?',
-      'Open Settings'
+    vscode.window.showInformationMessage(
+      'DarkHorse: darkhorse.client.standardsFile is not set. Opening Settings — search for "darkhorse client".'
     );
-    if (choice === 'Open Settings') {
-      vscode.commands.executeCommand('workbench.action.openSettings', 'darkhorse.client');
-    }
+    vscode.commands.executeCommand('workbench.action.openSettings', 'darkhorse.client');
     return;
   }
 
-  if (!fs.existsSync(configured)) {
-    const choice = await vscode.window.showInformationMessage(
-      `DarkHorse: ${configured} does not exist. Create it from the starter template?`,
-      'Create', 'Cancel'
+  // Expand ~ in case the user typed a tilde path on Windows
+  const resolved = configured.replace(/^~(?=$|\/|\\)/, require('os').homedir());
+
+  // If the configured file doesn't exist yet, create it directly from the
+  // starter template. The developer has already configured the path — that's
+  // the consent; no extra confirmation prompt (the previous toast was easy
+  // to miss).
+  if (!fs.existsSync(resolved)) {
+    console.log('[DarkHorse] openClientStandards: file missing, creating from starter template');
+    try {
+      const dir = path.dirname(resolved);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(resolved, STARTER_TEMPLATE, 'utf-8');
+    } catch (err: any) {
+      vscode.window.showErrorMessage(
+        `DarkHorse: Could not create standards file at ${resolved} — ${err?.message ?? err}`
+      );
+      return;
+    }
+    vscode.window.showInformationMessage(
+      `DarkHorse: Created starter standards file at ${resolved}. Edit it for your team's conventions; changes are hot-reloaded.`
     );
-    if (choice !== 'Create') return;
-    const dir = path.dirname(configured);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(configured, STARTER_TEMPLATE, 'utf-8');
   }
 
-  const doc = await vscode.workspace.openTextDocument(configured);
-  await vscode.window.showTextDocument(doc);
+  console.log('[DarkHorse] openClientStandards: opening', resolved);
+  const uri = vscode.Uri.file(resolved);
+  const doc = await vscode.workspace.openTextDocument(uri);
+  await vscode.window.showTextDocument(doc, { preview: false });
 }

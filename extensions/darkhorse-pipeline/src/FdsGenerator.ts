@@ -11,6 +11,8 @@ import {
   FdsGroundingContext
 } from './FdsAgentGrounder';
 import { renderStandardsForPrompt } from './StandardsLoader';
+import { resolveTemplate } from './TemplateConfig';
+import { renderIntoTemplateFile } from './TemplateRenderer';
 
 export interface FdsSection {
   businessBackground: string;
@@ -117,7 +119,28 @@ export class FdsGenerator {
         // Generate .docx file
         const fileName = `${state.title.replace(/[^a-zA-Z0-9]/g, '_')}_FDS_v1_0.docx`;
         const filePath = path.join(outputFolder, fileName);
-        await DocxWriter.writeFds(fdsDoc, filePath);
+
+        // CPI-6 item 4 — if a client template is configured for this RICEFW
+        // type, fill the client template instead of writing the generic doc.
+        // Falls back to DocxWriter when no template is configured.
+        const tpl = resolveTemplate(state.ricefwType, 'fds');
+        if (tpl) {
+          try {
+            const fields = FdsGenerator.flattenForTemplate(fdsDoc);
+            const result = renderIntoTemplateFile(tpl, fields, filePath);
+            console.log(
+              `[DarkHorse] FDS rendered into client template: ${result.replacedCount} sections filled, ` +
+              `${result.unmappedFields.length} fields unmapped, ${result.missingHeadings.length} headings missing data`
+            );
+          } catch (err: any) {
+            vscode.window.showWarningMessage(
+              `DarkHorse: Client FDS template render failed — falling back to generic format. ${err?.message ?? err}`
+            );
+            await DocxWriter.writeFds(fdsDoc, filePath);
+          }
+        } else {
+          await DocxWriter.writeFds(fdsDoc, filePath);
+        }
 
         // Save to state
         await stateManager.markFdsGenerated(JSON.stringify(fdsDoc), filePath);
@@ -262,6 +285,47 @@ UI / report / form policy in the FDS:
 - Freestyle SAPUI5 is the exception (~20%) — only when custom controls, third-party libraries (D3/Leaflet), guided wizards, or consumer-grade UX are required. Document the justification in inputOutputSpec.
 
 Return ONLY valid JSON matching the exact structure requested. No markdown fences. No preamble. No explanation.`;
+  }
+
+  /**
+   * Flatten an FdsDocument into a string-only map keyed by the same field
+   * names used in the client templates-config (TemplateConfig.HeadingMapping.field).
+   * Arrays become newline-joined; nested structures render as labelled text.
+   */
+  private static flattenForTemplate(fds: FdsDocument): Record<string, string> {
+    const s = fds.sections;
+    const renderFr = (arr: typeof s.functionalRequirements): string =>
+      arr.map(r => `${r.id} [${r.priority}] — ${r.description}`).join('\n');
+    const renderScope = (scope: typeof s.scope): string => {
+      const inList  = (scope.inScope ?? []).map(x => `• In scope: ${x}`).join('\n');
+      const outList = (scope.outOfScope ?? []).map(x => `• Out of scope: ${x}`).join('\n');
+      return [inList, outList].filter(Boolean).join('\n');
+    };
+    return {
+      businessBackground:    s.businessBackground,
+      processOverview:       s.processOverview,
+      scope:                 renderScope(s.scope),
+      functionalRequirements:renderFr(s.functionalRequirements ?? []),
+      uiDesign:              s.uiDesign,
+      inputOutputSpec:       s.inputOutputSpec,
+      businessRules:         (s.businessRules ?? []).join('\n'),
+      errorHandling:         (s.errorHandling ?? []).join('\n'),
+      authorization:         s.authorization,
+      reportingRequirements: s.reportingRequirements,
+      openItems:             (s.openItems ?? []).join('\n'),
+      // Additional fields the UNFI template references that we don't yet
+      // produce explicitly — kept empty so the existing template instruction
+      // text stays visible until the LLM produces these in Phase B.
+      businessDriver:        '',
+      asIsProcess:           '',
+      toBeProcess:           '',
+      businessRisks:         '',
+      assumptions:           '',
+      testScenarios:         '',
+      performance:           '',
+      dependencies:          '',
+      frequencyAndSchedule:  ''
+    };
   }
 
   private static parseResponse(raw: string, state: any): FdsDocument {
