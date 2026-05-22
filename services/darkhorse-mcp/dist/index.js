@@ -36,6 +36,7 @@ const GetApplicationLogPattern_1 = require("./tools/GetApplicationLogPattern");
 const GetCdsView_1 = require("./tools/GetCdsView");
 const GetEmlSyntax_1 = require("./tools/GetEmlSyntax");
 const GetRapPattern_1 = require("./tools/GetRapPattern");
+const GetCboPattern_1 = require("./tools/GetCboPattern");
 const AcknowledgeCatalog_1 = require("./tools/AcknowledgeCatalog");
 const StaticCatalogProvider_1 = require("./src/providers/StaticCatalogProvider");
 const AzureSearchKnowledgeProvider_1 = require("./src/providers/AzureSearchKnowledgeProvider");
@@ -193,6 +194,21 @@ const TOOL_DESCRIPTORS = [
         }
     },
     {
+        name: 'get_cbo_pattern',
+        endpoint: '/tools/get-cbo-pattern',
+        description: 'Return the canonical Custom Business Object pattern (Z-table + CDS interface + ' +
+            'managed BDEF + behavior pool + projection + SRVD + SRVB) for new persistent ' +
+            'custom data. Replaces Z-table + direct INSERT (Level C) with a Level A RAP-managed BO.',
+        inputSchema: {
+            type: 'object',
+            required: ['scenario'],
+            properties: {
+                scenario: { type: 'string', description: 'Free-text scenario, e.g. "backorder log header".' },
+                required_fields: { type: 'array', items: { type: 'string' }, description: 'Optional list of required field names.' }
+            }
+        }
+    },
+    {
         name: 'acknowledge_catalog',
         endpoint: '/catalog/acknowledge',
         description: 'Persist a developer-acknowledged SAP exit or BAdI to the static seed catalog so future ' +
@@ -266,6 +282,9 @@ function buildApp(provider, staticProvider, providerReason) {
     });
     app.post('/tools/get-rap-pattern', (req, res) => {
         runTool(req, res, 'get_rap_pattern', () => (0, GetRapPattern_1.getRapPattern)(req.body));
+    });
+    app.post('/tools/get-cbo-pattern', (req, res) => {
+        runTool(req, res, 'get_cbo_pattern', () => (0, GetCboPattern_1.getCboPattern)(req.body));
     });
     // Sprint 3 — persist a developer-acknowledged SAP object to the seed catalog
     // so future runs treat it as known valid. After writing, the static provider

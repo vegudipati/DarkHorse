@@ -16,6 +16,16 @@ export interface GetCdsViewInput {
     sap_table: string;
     use_case?: string;
 }
+export interface ProposedCdsView {
+    /** Suggested Z* DDLS name, e.g. ZI_VBAK. */
+    name: string;
+    /** SQL view name (16-char DDIC limit). */
+    sqlViewName: string;
+    /** Clean Core level the wrapper inherits — typically B (released-but-classic). */
+    level: 'B';
+    /** Ready-to-paste DDL skeleton. Field list is TODO — TDS inputOutputSpec fills it. */
+    template: string;
+}
 export interface GetCdsViewOutput {
     /** True if a released CDS replacement was found, false otherwise. */
     found: boolean;
@@ -27,6 +37,11 @@ export interface GetCdsViewOutput {
     rationale: string;
     /** Falls through to a Level B BAPI when no Level A CDS is registered. */
     fallbackHint: string | null;
+    /** Sprint 6 step (B): when no released view exists, a proposed Z wrapper
+     *  view is suggested. The TDS Agent should add this as a new DDLS object
+     *  in the abapObjectList; the Code Agent should SELECT from this view
+     *  instead of the underlying SAP table. */
+    proposed: ProposedCdsView | null;
     source: string;
     catalogVersion: string;
 }

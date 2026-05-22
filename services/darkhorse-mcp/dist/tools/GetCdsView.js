@@ -30,6 +30,9 @@ async function getCdsView(input, provider) {
     // contains a CDS entry.
     const cdsAlt = record.alternatives?.find(a => a.type === 'CDS');
     if (!cdsAlt) {
+        // Sprint 6 step (B): propose a Z wrapper view so the deliverable can still
+        // be Level A-leaning. The TDS Agent grounder adds this to the abapObjectList.
+        const proposed = buildProposedWrapper(table);
         return {
             found: false,
             sapTable: table,
@@ -38,13 +41,14 @@ async function getCdsView(input, provider) {
             fields: [],
             example: '',
             rationale: `No released CDS interface view is registered for ${table} in the DarkHorse catalog. ` +
-                'Before generating code, check the SAP Business Accelerator Hub (api.sap.com) for an ' +
-                `I_*-prefixed view that exposes ${table}. If none exists, document the gap and proceed ` +
-                'with the lowest-level acceptable alternative (BAPI for writes; classic SELECT only as a ' +
-                'last resort with explicit Level C acknowledgement in the design).',
+                `PROPOSED: include a new DDLS object ${proposed.name} in the abapObjectList ` +
+                `that wraps ${table}, then SELECT from ${proposed.name} in the consuming program. ` +
+                `Also check the SAP Business Accelerator Hub (api.sap.com) for an I_*-prefixed view ` +
+                `that exposes ${table}; if one exists it should be preferred over the Z wrapper.`,
             fallbackHint: record.alternatives && record.alternatives.length > 0
                 ? `Non-CDS alternative noted: ${record.alternatives[0].name} (${record.alternatives[0].type}, Level ${record.alternatives[0].level})`
                 : null,
+            proposed,
             source: record.providerId,
             catalogVersion: record.catalogVersion
         };
@@ -61,9 +65,42 @@ async function getCdsView(input, provider) {
             `Use the released CDS interface view ${cdsAlt.name} (Level ${cdsAlt.level}) instead. ` +
             `${cdsAlt.notes ?? ''}`.trim(),
         fallbackHint: null,
+        proposed: null,
         source: record.providerId,
         catalogVersion: record.catalogVersion
     };
+}
+// ---------------------------------------------------------------------------
+// Wrapper-view proposal — used when no released CDS view exists for the table.
+// Generates a name + SQL view name + ready-to-paste DDL skeleton with a TODO
+// field list. The TDS inputOutputSpec drives which fields the Code Agent
+// fills in when generating the consuming program.
+// ---------------------------------------------------------------------------
+function buildProposedWrapper(table) {
+    const upperTable = table.trim().toUpperCase();
+    // ZI_ + table — kept short (max DDIC view name = 30 chars; standard tables
+    // are <=5 chars so ZI_<TABLE> is comfortably within limits).
+    const viewName = `ZI_${upperTable}`;
+    // SQL view name has a 16-char limit. ZIV_<TABLE> for 4 + 5 = 9 chars.
+    const sqlViewName = `ZIV_${upperTable}`.slice(0, 16);
+    const template = [
+        `@AbapCatalog.sqlViewName: '${sqlViewName}'`,
+        `@AbapCatalog.compiler.compareFilter: true`,
+        `@AbapCatalog.preserveKey: true`,
+        `@AccessControl.authorizationCheck: #CHECK`,
+        `@EndUserText.label: 'DarkHorse wrapper view over ${upperTable}'`,
+        `@ClientHandling.algorithm: #SESSION_VARIABLE`,
+        `define view ${viewName} as select from ${upperTable.toLowerCase()} {`,
+        `  // TODO — list the fields the consuming program needs.`,
+        `  // Drive this list from the TDS inputOutputSpec. Mark key fields with`,
+        `  // the leading "key" keyword.`,
+        `  key mandt,`,
+        `  // key <key_field_1>,`,
+        `  // <non_key_field_1>,`,
+        `  // <non_key_field_2>`,
+        `}`
+    ].join('\n');
+    return { name: viewName, sqlViewName, level: 'B', template };
 }
 // ---------------------------------------------------------------------------
 // Helpers

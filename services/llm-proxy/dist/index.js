@@ -124,8 +124,13 @@ function buildApp(adapter, scrubber, rateLimiter, auditLogger) {
             res.status(400).json({ error: 'prompt is required and must be a non-empty string.' });
             return;
         }
-        if (body.prompt.length > 8000) {
-            res.status(400).json({ error: 'prompt exceeds maximum length of 8000 characters.' });
+        // Prompt-length cap. Originally 8000 chars (MVP-5 era, before grounding).
+        // CPI-6 Sprint 3+4 grounding can produce a 5-8 KB "## Grounded SAP
+        // knowledge" block, so we raise to 32 KB. Claude Sonnet 4 itself accepts
+        // ~800 KB before hitting its 200K-token window — this cap is a safety
+        // bound, not a model constraint.
+        if (body.prompt.length > 32000) {
+            res.status(400).json({ error: `prompt exceeds maximum length of 32000 characters (got ${body.prompt.length}).` });
             return;
         }
         // 3. PII scrubbing — strip SAP system IDs, client numbers, hostnames

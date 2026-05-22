@@ -38,6 +38,7 @@ import { getApplicationLogPattern,  GetApplicationLogPatternInput }  from './too
 import { getCdsView,                GetCdsViewInput }                from './tools/GetCdsView';
 import { getEmlSyntax,              GetEmlSyntaxInput }              from './tools/GetEmlSyntax';
 import { getRapPattern,             GetRapPatternInput }             from './tools/GetRapPattern';
+import { getCboPattern,             GetCboPatternInput }             from './tools/GetCboPattern';
 import { acknowledgeCatalog,        AcknowledgeCatalogInput }        from './tools/AcknowledgeCatalog';
 
 import { KnowledgeProvider }            from './src/providers/KnowledgeProvider';
@@ -228,6 +229,22 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     }
   },
   {
+    name:        'get_cbo_pattern',
+    endpoint:    '/tools/get-cbo-pattern',
+    description:
+      'Return the canonical Custom Business Object pattern (Z-table + CDS interface + ' +
+      'managed BDEF + behavior pool + projection + SRVD + SRVB) for new persistent ' +
+      'custom data. Replaces Z-table + direct INSERT (Level C) with a Level A RAP-managed BO.',
+    inputSchema: {
+      type: 'object',
+      required: ['scenario'],
+      properties: {
+        scenario:        { type: 'string', description: 'Free-text scenario, e.g. "backorder log header".' },
+        required_fields: { type: 'array', items: { type: 'string' }, description: 'Optional list of required field names.' }
+      }
+    }
+  },
+  {
     name:        'acknowledge_catalog',
     endpoint:    '/catalog/acknowledge',
     description:
@@ -326,6 +343,11 @@ function buildApp(
   app.post('/tools/get-rap-pattern', (req: express.Request, res: express.Response) => {
     runTool(req, res, 'get_rap_pattern', () =>
       getRapPattern(req.body as GetRapPatternInput));
+  });
+
+  app.post('/tools/get-cbo-pattern', (req: express.Request, res: express.Response) => {
+    runTool(req, res, 'get_cbo_pattern', () =>
+      getCboPattern(req.body as GetCboPatternInput));
   });
 
   // Sprint 3 — persist a developer-acknowledged SAP object to the seed catalog
