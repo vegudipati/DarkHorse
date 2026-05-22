@@ -87,9 +87,15 @@ export class SolutionOverviewPanel {
     try {
       const { FdsGenerator } = require('./FdsGenerator');
       await FdsGenerator.generate(this.context, this.stateManager, this.tracker);
-    } catch {
-      vscode.window.showInformationMessage(
-        'DarkHorse: Solution Overview approved. FDS generation will begin shortly.'
+    } catch (err: any) {
+      // Surface the real error rather than swallowing it. A silent catch here
+      // caused Sprint 3 regression reports where "Approve" appeared to do
+      // nothing — the user only saw a generic "FDS generation will begin
+      // shortly" while the actual failure was hidden.
+      const message = err?.message ?? String(err);
+      console.error('DarkHorse: FdsGenerator failed', err);
+      vscode.window.showErrorMessage(
+        `DarkHorse: FDS generation failed — ${message}. Use "DarkHorse: Resume Pipeline" to retry.`
       );
     }
   }

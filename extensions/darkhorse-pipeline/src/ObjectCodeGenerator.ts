@@ -2,6 +2,18 @@ import * as vscode from 'vscode';
 import { PipelineStateManager, AbapObject } from './PipelineStateManager';
 import { PipelineTracker } from './PipelineTracker';
 import { TdsDocument } from './DocxWriter';
+import {
+  verifyGeneratedCode,
+  acknowledgeCatalogEntry,
+  resolveMcpPort,
+  CleanCoreReport,
+  CleanCoreFinding
+} from './CleanCoreVerifier';
+import {
+  groundObjectForGeneration,
+  renderGroundingForPrompt,
+  GroundingContext
+} from './CodeAgentGrounder';
 
 export class ObjectCodeGenerator {
 
@@ -82,17 +94,66 @@ export class ObjectCodeGenerator {
     const proxyPort = config.get<number>('darkhorse.pipeline.llmProxyPort', 47291);
     const totalObjects = stateManager.getState()?.abapObjects.length ?? 1;
 
-    // Step 1 — Generate code immediately without confirmation dialog
+    // First-pass generation with no acknowledgements.
+    const first = await ObjectCodeGenerator.generateOnce(
+      obj, tdsDoc, index, proxyPort, totalObjects, []
+    );
+    if (!first.code) {
+      return false;
+    }
+
+    // Show preview. The regenerator lets the developer acknowledge "not in
+    // catalog" findings and retry without losing scroll/context.
+    const accepted = await ObjectCodeGenerator.showDiffPreview(
+      obj, first.code, stateManager, first.report,
+      async (acks: string[]) => {
+        return ObjectCodeGenerator.generateOnce(
+          obj, tdsDoc, index, proxyPort, totalObjects, acks
+        );
+      }
+    );
+    return accepted;
+  }
+
+  /**
+   * One full generate cycle: ground (MCP) -> prompt -> LLM -> clean -> verify.
+   * Reused for the initial generation and for every developer-driven
+   * regeneration with acknowledgements.
+   */
+  private static async generateOnce(
+    obj: AbapObject,
+    tdsDoc: TdsDocument,
+    index: number,
+    proxyPort: number,
+    totalObjects: number,
+    acknowledgements: readonly string[]
+  ): Promise<{ code: string; report?: CleanCoreReport }> {
+
+    const ackSuffix = acknowledgements.length > 0
+      ? ` (regen with ${acknowledgements.length} ack)`
+      : '';
+
     let generatedCode = '';
 
     await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
-      title: `DarkHorse: Generating ${obj.objectName} (${index + 1} of ${totalObjects})...`,
+      title: `DarkHorse: Generating ${obj.objectName} (${index + 1} of ${totalObjects})${ackSuffix}...`,
       cancellable: false
     }, async (progress) => {
+      // Pre-generation grounding via MCP. Fails-open if MCP is down.
+      progress.report({ message: 'Grounding via MCP...' });
+      let groundingContext: GroundingContext | undefined;
+      try {
+        groundingContext = await groundObjectForGeneration(obj, resolveMcpPort());
+      } catch (err: any) {
+        console.error('DarkHorse: CodeAgentGrounder threw:', err?.message ?? err);
+      }
+
       progress.report({ message: 'Calling AI...' });
       try {
-        const prompt = ObjectCodeGenerator.buildPrompt(obj, tdsDoc, index);
+        const prompt = ObjectCodeGenerator.buildPrompt(
+          obj, tdsDoc, index, groundingContext, acknowledgements
+        );
         generatedCode = await ObjectCodeGenerator.callProxy(proxyPort, {
           prompt,
           systemPrompt: ObjectCodeGenerator.getSystemPrompt(),
@@ -109,18 +170,23 @@ export class ObjectCodeGenerator {
     });
 
     if (!generatedCode) {
-      return false;
+      return { code: '' };
     }
 
-    // Clean up code
     generatedCode = generatedCode
       .replace(/```abap/gi, '')
       .replace(/```/g, '')
       .trim();
 
-    // Step 2 — Show preview panel and wait for accept/reject
-    const accepted = await ObjectCodeGenerator.showDiffPreview(obj, generatedCode, stateManager);
-    return accepted;
+    // Post-generation Clean Core verification. Acknowledged refs are excluded
+    // from the verdict so a fully-acknowledged report passes.
+    let report: CleanCoreReport | undefined;
+    try {
+      report = await verifyGeneratedCode(generatedCode, resolveMcpPort(), acknowledgements);
+    } catch (err: any) {
+      console.error('DarkHorse: CleanCoreVerifier threw:', err?.message ?? err);
+    }
+    return { code: generatedCode, report };
   }
 
   /**
@@ -129,15 +195,13 @@ export class ObjectCodeGenerator {
    */
   private static async showDiffPreview(
     obj: AbapObject,
-    generatedCode: string,
-    stateManager: PipelineStateManager
+    initialCode: string,
+    stateManager: PipelineStateManager,
+    initialReport: CleanCoreReport | undefined,
+    regenerator: (acknowledgements: string[]) => Promise<{ code: string; report?: CleanCoreReport }>
   ): Promise<boolean> {
 
     return new Promise(async (resolve) => {
-      // Write generated code to a temp virtual document
-      const scheme = 'darkhorse-generated';
-
-      // Create a simple webview to show the code with Accept/Reject
       const panel = vscode.window.createWebviewPanel(
         'darkhorseCodePreview',
         `Generated: ${obj.objectName}`,
@@ -145,8 +209,14 @@ export class ObjectCodeGenerator {
         { enableScripts: true }
       );
 
+      // Mutable state — the regenerate handler swaps these in place.
+      let currentCode   = initialCode;
+      let currentReport = initialReport;
+      // Sticky set of acknowledgements across regenerations within this preview.
+      const stickyAcks  = new Set<string>();
+
       panel.webview.html = ObjectCodeGenerator.getPreviewHtml(
-        obj, generatedCode
+        obj, currentCode, currentReport
       );
 
       let resolved = false;
@@ -156,7 +226,7 @@ export class ObjectCodeGenerator {
           resolved = true;
 
           // Copy to clipboard first
-          await vscode.env.clipboard.writeText(generatedCode);
+          await vscode.env.clipboard.writeText(currentCode);
 
           // Save state immediately before any other async operations
           const currentState = stateManager.getState();
@@ -186,7 +256,7 @@ export class ObjectCodeGenerator {
               const filePath = await PipelineGitHelper.saveCodeToFile(
                 obj.objectName,
                 obj.objectType,
-                generatedCode,
+                currentCode,
                 outputFolder
               );
               vscode.window.showInformationMessage(
@@ -209,6 +279,58 @@ export class ObjectCodeGenerator {
           resolved = true;
           panel.dispose();
           resolve(false);
+        } else if (message.command === 'regenerate') {
+          // Developer acknowledged one or more findings and wants a fresh
+          // generation. We merge into a sticky set so prior acknowledgements
+          // survive across multiple regen rounds.
+          const newAcks: string[] = Array.isArray(message.acknowledgements)
+            ? message.acknowledgements.map((s: any) => String(s)).filter((s: string) => s.length > 0)
+            : [];
+
+          // Persist each NEW (not already-sticky) acknowledgement to the MCP
+          // seed catalog so future runs treat the object as known valid.
+          // We look up the category in the current report so the MCP server
+          // writes to the right JSON file. Fails-soft — if the write fails,
+          // the in-memory acknowledgement still applies for this regen.
+          const findingsByRef = new Map<string, CleanCoreFinding>();
+          for (const f of (currentReport?.findings ?? [])) {
+            findingsByRef.set(f.reference.toUpperCase(), f);
+          }
+          const port = resolveMcpPort();
+          const writes: Promise<unknown>[] = [];
+          for (const ack of newAcks) {
+            const key = ack.toUpperCase();
+            if (stickyAcks.has(key)) continue;   // already persisted earlier this preview
+            const finding = findingsByRef.get(key);
+            // Today only 'exit' findings reach the Acknowledge checkbox; future
+            // BAdI / FM scanners can extend this map.
+            const mcpCategory: 'exit' | 'badi' | null =
+              finding?.category === 'exit' ? 'exit' : null;
+            if (mcpCategory) {
+              writes.push(acknowledgeCatalogEntry(ack, mcpCategory, port));
+            }
+            stickyAcks.add(key);
+          }
+          await Promise.all(writes);
+
+          try {
+            const result = await regenerator(Array.from(stickyAcks));
+            if (result.code) {
+              currentCode   = result.code;
+              currentReport = result.report;
+              panel.webview.html = ObjectCodeGenerator.getPreviewHtml(
+                obj, currentCode, currentReport
+              );
+            } else {
+              vscode.window.showErrorMessage(
+                `DarkHorse: regeneration for ${obj.objectName} produced no code.`
+              );
+            }
+          } catch (err: any) {
+            vscode.window.showErrorMessage(
+              `DarkHorse: regeneration failed — ${err?.message ?? err}`
+            );
+          }
         }
       });
 
@@ -223,7 +345,9 @@ export class ObjectCodeGenerator {
   private static buildPrompt(
     obj: AbapObject,
     tds: TdsDocument,
-    index: number
+    index: number,
+    groundingContext?: GroundingContext,
+    acknowledgements: readonly string[] = []
   ): string {
     const prevObj = index > 0
       ? tds.sections.abapObjectList[index - 1]
@@ -231,6 +355,26 @@ export class ObjectCodeGenerator {
     const nextObj = index < tds.sections.abapObjectList.length - 1
       ? tds.sections.abapObjectList[index + 1]
       : null;
+
+    const groundingBlock = groundingContext
+      ? renderGroundingForPrompt(groundingContext)
+      : '';
+
+    const groundingSection = groundingBlock
+      ? `\n\n${groundingBlock}\n`
+      : '';
+
+    const ackSection = acknowledgements.length === 0 ? '' : `
+
+## Developer Acknowledgements
+The following SAP objects have been explicitly confirmed by the developer as
+real, released SAP artifacts (even though the DarkHorse seed catalog does not
+yet contain them). You MAY reference these by name in the generated code:
+
+${acknowledgements.map(a => `- ${a} (developer-acknowledged valid SAP object)`).join('\n')}
+
+Use the acknowledged names exactly as written. Do not invent variant names.
+`;
 
     return `Generate complete, production-ready ABAP code for this SAP object.
 
@@ -250,33 +394,294 @@ Context:
 - Next object: ${nextObj ? `${nextObj.objectName} (${nextObj.objectType})` : 'None'}
 - Technical approach: ${tds.sections.technicalApproach}
 - Database strategy: ${tds.sections.dbDesign}
-
+${groundingSection}${ackSection}
 Return ONLY the complete ABAP source code. No explanation. No markdown fences.
 Start with REPORT ${obj.objectName}. or CLASS ${obj.objectName} DEFINITION. as appropriate.`;
   }
 
   private static getSystemPrompt(): string {
-    return `You are an expert SAP ABAP developer with 15 years of experience.
-Generate complete, production-ready ABAP code following these rules:
-- Always check SY-SUBRC after database operations
-- Use ALV Grid (CL_SALV_TABLE) for report output
-- Add meaningful inline comments
-- Use AUTHORITY-CHECK where authorization objects are mentioned
+    return `You are an expert SAP ABAP developer with 15 years of experience writing
+Clean Core compliant code for S/4HANA Cloud and Private editions.
+
+The user prompt MAY include a "## Grounded SAP knowledge (CPI-6 Sprint 3)" section.
+If present, that section contains REAL SAP object names, RAP patterns, EML templates,
+CDS view names, and SLG1 patterns retrieved live from the DarkHorse MCP knowledge
+service. You MUST use those exact names and templates in the generated code. Do
+not invent SAP object names when the grounding section provides them. The grounding
+is authoritative — it overrides anything your training data suggests.
+
+Clean Core compliance rules — apply in this order:
+- Reads: ONLY via released CDS interface views (I_*). NEVER SELECT directly from
+  SAP standard tables (VBAK, MARA, KNA1, BKPF, BSEG, EKKO, etc.). The grounding
+  section names the correct CDS view per table when applicable.
+- Writes on RAP-managed entities: ONLY via EML (MODIFY ENTITIES ... CREATE/UPDATE/
+  DELETE ... COMMIT ENTITIES). The grounding section provides EML templates.
+- Custom persistent data: use the CBO framework (CDS + managed BDEF), not
+  Z* tables with direct INSERTs.
+- Enhancements: ONLY released BAdIs in published enhancement spots. Classic
+  user exits (USEREXIT_*) are Level B and acceptable only when no released
+  BAdI exists. NEVER reference USEREXIT_ATP_QUANTITY — it does not exist;
+  ATP_CUST_BADI is the real extension point.
+- Logging: ALWAYS use SAP Application Log (SLG1) via BAL_LOG_CREATE /
+  BAL_LOG_MSG_ADD / BAL_DB_SAVE. NEVER create custom Z log tables.
+- Background processing: use Application Jobs framework (IF_APJ_RT_RUN) —
+  NOT classic SM37 / JOB_OPEN.
+
+General quality rules:
+- Always check SY-SUBRC after CDS/table operations and CALL FUNCTION
+- Use CL_SALV_TABLE for classic ALV output (acceptable Level B for reports)
+- Use AUTHORITY-CHECK where authorization objects are mentioned in the TDS
 - Follow SAP naming conventions (Z prefix for custom objects)
-- Never use SELECT * — always specify fields
-- Never generate code that deletes from database tables without WHERE clause
-- Never generate code that releases transports
-- Always add error handling for CALL FUNCTION statements
-Return ONLY the ABAP source code. No markdown. No explanation.`;
+- Never SELECT * — always specify fields
+- Never DELETE / UPDATE without a WHERE clause
+- Never release transports from code
+- Add concise inline comments only where the logic is non-obvious
+
+# Worked examples — DO follow these patterns
+
+## Example 1 — Reading sales order header data
+WRONG (Level C — direct SELECT on SAP standard table):
+\`\`\`
+SELECT vbeln, vkorg, kunnr, netwr
+  FROM vbak
+  INTO TABLE @DATA(lt_orders)
+  WHERE vkorg = '1000'.
+\`\`\`
+
+CORRECT (Level A — released CDS interface view):
+\`\`\`
+SELECT salesorder, salesorganization, soldtoparty, totalnetamount
+  FROM i_salesorder
+  INTO TABLE @DATA(lt_orders)
+  WHERE salesorganization = '1000'.
+IF sy-subrc <> 0.
+  " no data — caller handles
+ENDIF.
+\`\`\`
+
+## Example 2 — Creating a sales order
+WRONG (Level B — classic BAPI when a released RAP BDEF exists):
+\`\`\`
+CALL FUNCTION 'BAPI_SALESORDER_CREATEFROMDAT2'
+  EXPORTING order_header_in = ls_header
+  IMPORTING salesdocument   = lv_doc
+  TABLES    return           = lt_return.
+COMMIT WORK.
+\`\`\`
+
+CORRECT (Level A — EML against the released RAP behavior definition):
+\`\`\`
+MODIFY ENTITIES OF i_salesordertp
+  ENTITY salesorder
+    CREATE FIELDS ( salesorganization distributionchannel division )
+    WITH VALUE #( ( %cid                 = 'cid_so_1'
+                    salesorganization    = '1000'
+                    distributionchannel  = '10'
+                    division             = '00' ) )
+    MAPPED   DATA(ls_mapped)
+    FAILED   DATA(ls_failed)
+    REPORTED DATA(ls_reported).
+
+COMMIT ENTITIES RESPONSE OF i_salesordertp
+  FAILED   DATA(ls_commit_failed)
+  REPORTED DATA(ls_commit_reported).
+\`\`\`
+
+## Example 3 — Logging an error
+WRONG (Level C — custom Z log table):
+\`\`\`
+INSERT INTO z_error_log VALUES @( VALUE #(
+  log_date    = sy-datum
+  log_time    = sy-uzeit
+  log_user    = sy-uname
+  log_message = 'ATP check failed' ) ).
+\`\`\`
+
+CORRECT (Level A — SAP Application Log via SLG1):
+\`\`\`
+DATA: lv_log_handle TYPE balloghndl,
+      ls_log        TYPE bal_s_log,
+      ls_msg        TYPE bal_s_msg.
+
+ls_log-object    = 'Z_DARKHORSE'.
+ls_log-subobject = 'Z_BACKORDER'.
+ls_log-aldate    = sy-datum.
+ls_log-altime    = sy-uzeit.
+ls_log-aluser    = sy-uname.
+
+CALL FUNCTION 'BAL_LOG_CREATE'
+  EXPORTING  i_s_log      = ls_log
+  IMPORTING  e_log_handle = lv_log_handle.
+
+ls_msg-msgty = 'E'.
+ls_msg-msgid = 'ZDH'.
+ls_msg-msgno = '001'.
+ls_msg-msgv1 = 'ATP check failed'.
+
+CALL FUNCTION 'BAL_LOG_MSG_ADD'
+  EXPORTING  i_log_handle = lv_log_handle
+             i_s_msg      = ls_msg.
+
+CALL FUNCTION 'BAL_DB_SAVE'
+  EXPORTING  i_save_all   = abap_true.
+\`\`\`
+
+# Output format
+Return ONLY the ABAP source code. No markdown fences. No explanation outside ABAP comments.
+Start with REPORT, CLASS ... DEFINITION, INTERFACE, or whatever object type the TDS requested.`;
   }
 
-  private static getPreviewHtml(obj: AbapObject, code: string): string {
-    const escapedCode = code
+  private static escapeHtml(s: string): string {
+    return s
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+  }
+
+  private static renderCleanCoreReport(report?: CleanCoreReport): string {
+    if (!report) {
+      return '';
+    }
+
+    if (report.mcpUnavailable) {
+      return `
+  <div class="cc-report cc-skipped">
+    <div class="cc-header">
+      <span class="cc-badge cc-badge-skip">CLEAN CORE</span>
+      <span class="cc-verdict">MCP server unavailable — verification skipped</span>
+    </div>
+    <div class="cc-notes">
+      ${report.notes.map(n => `<div>• ${ObjectCodeGenerator.escapeHtml(n)}</div>`).join('')}
+    </div>
+  </div>`;
+    }
+
+    const verdictLabel: Record<string, string> = {
+      pass:    'PASS — no Clean Core violations detected',
+      warn:    'WARN — Level C references present',
+      fail:    'FAIL — Level D references present',
+      skipped: 'SKIPPED'
+    };
+    const verdictClass: Record<string, string> = {
+      pass: 'cc-pass', warn: 'cc-warn', fail: 'cc-fail', skipped: 'cc-skipped'
+    };
+
+    // A finding qualifies for the Acknowledge action when MCP reported it as
+    // "not in the catalog" (exists=false AND level=null) — i.e., we couldn't
+    // confirm or deny the object's existence. Developers familiar with the
+    // SAP system can mark these as real to keep them in the next regenerate.
+    const isAcknowledgeable = (f: CleanCoreFinding): boolean =>
+      !f.acknowledged && f.exists === false && f.level === null;
+
+    const acknowledgeableCount = report.findings.filter(isAcknowledgeable).length;
+
+    const findingsHtml = report.findings.length === 0
+      ? '<div class="cc-empty">No SAP references required verification.</div>'
+      : `<table class="cc-table">
+           <thead>
+             <tr>
+               <th>Level</th><th>Reference</th><th>Category</th>
+               <th>Count</th><th>Suggested alternative</th><th>Notes</th>
+               <th class="cc-action-col">Action</th>
+             </tr>
+           </thead>
+           <tbody>
+             ${report.findings.map(f => {
+               const lvl = f.level ?? '?';
+               const lvlClass = `cc-lvl-${(f.level ?? 'unknown').toLowerCase()}`;
+               const refEsc = ObjectCodeGenerator.escapeHtml(f.reference);
+               const rowClass = f.acknowledged ? 'cc-ack-row' : '';
+               let actionCell = '<td class="cc-action-col"></td>';
+               if (f.acknowledged) {
+                 actionCell = '<td class="cc-action-col"><span class="cc-ack-badge">ACK</span></td>';
+               } else if (isAcknowledgeable(f)) {
+                 actionCell = `<td class="cc-action-col">
+                   <label class="cc-ack-label">
+                     <input type="checkbox" class="cc-ack-check" data-ref="${refEsc}"/>
+                     <span>Acknowledge as valid</span>
+                   </label>
+                 </td>`;
+               }
+               return `<tr class="${rowClass}">
+                 <td><span class="cc-lvl ${lvlClass}">${lvl}</span></td>
+                 <td class="cc-mono">${refEsc}</td>
+                 <td>${f.category}</td>
+                 <td>${f.occurrences}</td>
+                 <td class="cc-mono">${ObjectCodeGenerator.escapeHtml(f.alternative ?? '—')}</td>
+                 <td>${ObjectCodeGenerator.escapeHtml(f.description)}</td>
+                 ${actionCell}
+               </tr>`;
+             }).join('')}
+           </tbody>
+         </table>`;
+
+    const regenBar = acknowledgeableCount > 0
+      ? `<div class="cc-regen-bar">
+           <span class="cc-regen-hint">Tick "Acknowledge as valid" for each object MCP couldn't find but you know is a real SAP artifact. Each acknowledgement is written to the DarkHorse seed catalog so future runs treat it as known valid (Level B), then regenerate with the developer acknowledgements passed into the prompt.</span>
+           <button id="ccRegenBtn" class="cc-regen-btn" disabled onclick="ccRegenerate()">
+             ↻ Save &amp; Regenerate with <span id="ccAckCount">0</span> acknowledgement(s)
+           </button>
+         </div>`
+      : '';
+
+    return `
+  <div class="cc-report ${verdictClass[report.verdict] ?? ''}">
+    <div class="cc-header">
+      <span class="cc-badge">CLEAN CORE — CPI-6</span>
+      <span class="cc-verdict">${verdictLabel[report.verdict] ?? report.verdict}</span>
+      <span class="cc-counts">
+        <span class="cc-lvl cc-lvl-d">D: ${report.countsByLevel.D}</span>
+        <span class="cc-lvl cc-lvl-c">C: ${report.countsByLevel.C}</span>
+        <span class="cc-lvl cc-lvl-b">B: ${report.countsByLevel.B}</span>
+        <span class="cc-lvl cc-lvl-a">A: ${report.countsByLevel.A}</span>
+      </span>
+    </div>
+    ${findingsHtml}
+    ${regenBar}
+  </div>`;
+  }
+
+  private static getPreviewHtml(
+    obj: AbapObject,
+    code: string,
+    cleanCoreReport?: CleanCoreReport
+  ): string {
+    const escapedCode = ObjectCodeGenerator.escapeHtml(code);
 
     const lineCount = code.split('\n').length;
+
+    const cleanCoreHtml = ObjectCodeGenerator.renderCleanCoreReport(cleanCoreReport);
+
+    // CPI-6 hard gate: a Level D finding blocks Accept. The developer must
+    // either acknowledge any "not in catalog" finding they know is real
+    // (which removes them from the verdict count), reject and refine the BR,
+    // or manually edit the seed catalog if a known-hallucination entry is
+    // mis-flagged.
+    const isHardFail =
+      cleanCoreReport !== undefined &&
+      cleanCoreReport.verdict === 'fail';
+    const acceptDisabled = isHardFail ? 'disabled' : '';
+    const failBannerHtml = isHardFail
+      ? `<div class="cc-fail-banner">
+           <div class="cc-fail-title">🚫 Cannot accept — Level D Clean Core violation present</div>
+           <div class="cc-fail-body">
+             The Clean Core verifier found ${cleanCoreReport!.countsByLevel.D} Level&nbsp;D
+             reference(s) in the generated code (prohibited per the Clean Core
+             contract). The Accept button is disabled until you resolve them.
+             Choose one of:
+             <ul>
+               <li>If the finding is in the "Acknowledge as valid" column, tick it
+                   and click <em>Save &amp; Regenerate</em> — this writes the
+                   acknowledgement to the seed catalog and re-runs generation.</li>
+               <li>Click <em>Reject</em>, then refine the Business Requirement to
+                   avoid the prohibited pattern.</li>
+               <li>For catalog-flagged hallucinations (e.g. USEREXIT_ATP_QUANTITY),
+                   the catalog is authoritative — edit the JSON only if you have
+                   verified evidence the entry is wrong.</li>
+             </ul>
+           </div>
+         </div>`
+      : '';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -314,9 +719,22 @@ Return ONLY the ABAP source code. No markdown. No explanation.`;
       border: none;
     }
     .btn-accept { background: #238636; color: #fff; }
-    .btn-accept:hover { background: #2ea043; }
+    .btn-accept:hover:not(:disabled) { background: #2ea043; }
+    .btn-accept:disabled {
+      background: #30363d; color: #6e7681; cursor: not-allowed;
+      border: 1px dashed #da3633;
+    }
     .btn-reject { background: #da3633; color: #fff; }
     .btn-reject:hover { background: #f85149; }
+    .cc-fail-banner {
+      background: #3a0a0a; border: 2px solid #f85149; border-radius: 8px;
+      padding: 16px 20px; margin: 0 24px 16px;
+    }
+    .cc-fail-title { color: #f85149; font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+    .cc-fail-body { color: #e6edf3; font-size: 13px; line-height: 1.6; }
+    .cc-fail-body ul { margin: 8px 0 0 20px; }
+    .cc-fail-body li { margin-bottom: 4px; }
+    .cc-fail-body em { color: #79c0ff; font-style: normal; font-weight: 600; }
     .meta-bar {
       background: #1c2128;
       border-bottom: 1px solid #30363d;
@@ -353,6 +771,88 @@ Return ONLY the ABAP source code. No markdown. No explanation.`;
       color: #79c0ff;
       margin: 0 24px 16px;
     }
+    /* Clean Core report panel (CPI-6 Sprint 1) */
+    .cc-report {
+      margin: 0 24px 16px;
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 12px;
+      border: 1px solid #30363d;
+      background: #161b22;
+    }
+    .cc-report.cc-pass    { border-color: #238636; }
+    .cc-report.cc-warn    { border-color: #d29922; }
+    .cc-report.cc-fail    { border-color: #da3633; }
+    .cc-report.cc-skipped { border-color: #6e7681; }
+    .cc-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .cc-badge {
+      background: #1f6feb;
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .cc-badge.cc-badge-skip { background: #6e7681; }
+    .cc-verdict { color: #e6edf3; font-weight: 600; }
+    .cc-counts { margin-left: auto; display: flex; gap: 6px; }
+    .cc-lvl {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .cc-lvl-a { background: #238636; }
+    .cc-lvl-b { background: #1f6feb; }
+    .cc-lvl-c { background: #d29922; color: #0d1117; }
+    .cc-lvl-d { background: #da3633; }
+    .cc-lvl-unknown { background: #6e7681; }
+    .cc-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+    }
+    .cc-table th, .cc-table td {
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid #30363d;
+      vertical-align: top;
+    }
+    .cc-table th { color: #8b949e; font-weight: 600; }
+    .cc-mono { font-family: 'Consolas', 'Courier New', monospace; color: #79c0ff; }
+    .cc-empty { color: #8b949e; padding: 4px 0; }
+    .cc-notes { color: #8b949e; line-height: 1.6; }
+    .cc-action-col { width: 200px; white-space: nowrap; }
+    .cc-ack-label { display: inline-flex; align-items: center; gap: 6px;
+      color: #79c0ff; cursor: pointer; font-size: 12px; }
+    .cc-ack-label input { accent-color: #1f6feb; }
+    .cc-ack-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      background: #1a3a1a; color: #3fb950; font-weight: 700;
+      font-size: 11px; letter-spacing: 0.5px; border: 1px solid #238636;
+    }
+    .cc-ack-row td { opacity: 0.55; }
+    .cc-ack-row .cc-mono { text-decoration: line-through; }
+    .cc-regen-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin-top: 12px; padding: 10px 12px;
+      background: #1a2d4a; border: 1px solid #1f6feb; border-radius: 6px;
+    }
+    .cc-regen-hint { color: #79c0ff; font-size: 12px; flex: 1; }
+    .cc-regen-btn {
+      padding: 6px 14px; border-radius: 4px; border: none;
+      background: #1f6feb; color: #fff; font-size: 12px; font-weight: 600;
+      cursor: pointer;
+    }
+    .cc-regen-btn:hover:not(:disabled) { background: #388bfd; }
+    .cc-regen-btn:disabled { background: #30363d; color: #6e7681; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -363,7 +863,7 @@ Return ONLY the ABAP source code. No markdown. No explanation.`;
     </div>
     <div class="header-actions">
       <button class="btn-reject" onclick="reject()">✗ Reject</button>
-      <button class="btn-accept" onclick="accept()">✓ Accept & Copy to Clipboard</button>
+      <button class="btn-accept" onclick="accept()" ${acceptDisabled}>✓ Accept & Copy to Clipboard</button>
     </div>
   </div>
 
@@ -374,10 +874,14 @@ Return ONLY the ABAP source code. No markdown. No explanation.`;
   </div>
 
   <div class="note">
-    📋 Accepting will copy the code to your clipboard. 
+    📋 Accepting will copy the code to your clipboard.
     Paste it into SAP ADT, SE38, or the DarkHorse ABAP editor.
     The code has NOT been automatically saved to SAP.
   </div>
+
+  ${failBannerHtml}
+
+  ${cleanCoreHtml}
 
   <div class="code-container">
     <pre>${escapedCode}</pre>
@@ -387,6 +891,30 @@ Return ONLY the ABAP source code. No markdown. No explanation.`;
     const vscode = acquireVsCodeApi();
     function accept() { vscode.postMessage({ command: 'accept' }); }
     function reject() { vscode.postMessage({ command: 'reject' }); }
+
+    // Clean Core acknowledge/regenerate wiring (re-runs on every webview render)
+    (function () {
+      const checks = document.querySelectorAll('.cc-ack-check');
+      const btn = document.getElementById('ccRegenBtn');
+      const counter = document.getElementById('ccAckCount');
+      if (!btn) return;
+      function refreshState() {
+        const n = Array.from(checks).filter(c => c.checked).length;
+        if (counter) counter.textContent = String(n);
+        btn.disabled = n === 0;
+      }
+      checks.forEach(c => c.addEventListener('change', refreshState));
+      refreshState();
+    })();
+
+    function ccRegenerate() {
+      const acks = Array.from(document.querySelectorAll('.cc-ack-check'))
+        .filter(c => c.checked)
+        .map(c => c.getAttribute('data-ref'))
+        .filter(Boolean);
+      if (acks.length === 0) return;
+      vscode.postMessage({ command: 'regenerate', acknowledgements: acks });
+    }
   </script>
 </body>
 </html>`;

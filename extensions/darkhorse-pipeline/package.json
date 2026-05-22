@@ -2,7 +2,7 @@
   "name": "darkhorse-pipeline",
   "displayName": "DarkHorse Pipeline",
   "description": "BR → FDS → TDS → Code pipeline for SAP RICEFW development",
-  "version": "0.1.0",
+  "version": "0.6.7",
   "publisher": "deloitte-darkhorse",
   "engines": {
     "vscode": "^1.85.0"
@@ -76,6 +76,31 @@
           "type": "number",
           "default": 3100,
           "description": "Port of the DarkHorse LLM proxy (from MVP-5)"
+        },
+        "darkhorse.mcp.port": {
+          "type": "number",
+          "default": 47292,
+          "description": "Port of the DarkHorse MCP knowledge server (services/darkhorse-mcp). The Code Agent calls this for Clean Core verification."
+        },
+        "darkhorse.rag.azureSearchEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Azure AI Search endpoint URL for the RAG index (CPI-6 Sprint 2). Example: https://your-name.search.windows.net. When blank, the MCP server uses its built-in static catalogs only. The actual key is read from the AZURE_SEARCH_KEY environment variable for security."
+        },
+        "darkhorse.rag.indexName": {
+          "type": "string",
+          "default": "darkhorse-sap-knowledge-v1",
+          "description": "Azure AI Search index name for the DarkHorse RAG knowledge base."
+        },
+        "darkhorse.rag.azureOpenAiEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Azure OpenAI endpoint URL used by darkhorse-ingest to compute embeddings. Example: https://your-name.openai.azure.com. The key is read from AZURE_OPENAI_KEY env var. Not used by the extension itself at runtime; provided here for discoverability."
+        },
+        "darkhorse.rag.embeddingDeployment": {
+          "type": "string",
+          "default": "text-embedding-3-small",
+          "description": "Name of the Azure OpenAI deployment hosting the embedding model. Must match the deployment created in the Azure portal."
         }
       }
     }
@@ -83,7 +108,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package --no-dependencies --allow-missing-repository"
+    "package": "vsce package --allow-missing-repository"
   },
   "dependencies": {
     "docx": "^8.5.0",
