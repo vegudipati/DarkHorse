@@ -19,3 +19,6 @@ Thumbs.db
 # VS Code local settings
 .vscode/settings.json
 .vscode/launch.json
+
+# Claude Code local state — per-developer, never shared
+.claude/

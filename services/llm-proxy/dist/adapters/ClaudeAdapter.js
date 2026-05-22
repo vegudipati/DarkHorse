@@ -73,6 +73,12 @@ class ClaudeAdapter {
         const body = {
             model: MODEL,
             max_tokens: MAX_TOKENS,
+            // temperature=0 makes Claude greedy-decode: same prompt -> same output
+            // (within the ~99% determinism Claude provides at the API level). This
+            // is the single biggest lever for end-to-end pipeline reproducibility.
+            // Sprint 3 follow-up after the user reported run-to-run variance in
+            // ABAP object counts (3 vs 5 vs 6) for the same business requirement.
+            temperature: 0,
             system: systemPrompt,
             messages: [
                 { role: 'user', content: userMessage }
