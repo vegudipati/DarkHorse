@@ -22,3 +22,7 @@ Thumbs.db
 
 # Claude Code local state — per-developer, never shared
 .claude/
+
+# DarkHorse pipeline artefacts — generated .abap files, .docx FDS/TDS exports,
+# and the corrections/ folder. These are per-run outputs, not source code.
+output/
