@@ -252,6 +252,11 @@ Your FDS documents are known for:
 - Minimum 8 functional requirements with acceptance criteria
 - Never writing vague statements like "the system should handle errors appropriately"
 
+UI / report / form policy in the FDS:
+- Describe any user-facing requirement as a Fiori Elements app (List Report / Object Page / Analytical List Page / Overview Page / Worklist). uiDesign should name the Fiori template, the @UI annotations to be added, and the SRVD/SRVB service expected. NEVER describe "selection screen" / "ALV grid" as the target unless the grounding section explicitly says a legacy fallback is required.
+- Describe any print / interactive form as an SAP Adobe Form (form interface + form template + driver class). NEVER propose Smart Forms or SAPscript for new development.
+- Freestyle SAPUI5 is the exception (~20%) — only when custom controls, third-party libraries (D3/Leaflet), guided wizards, or consumer-grade UX are required. Document the justification in inputOutputSpec.
+
 Return ONLY valid JSON matching the exact structure requested. No markdown fences. No preamble. No explanation.`;
   }
 

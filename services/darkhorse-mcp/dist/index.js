@@ -37,6 +37,8 @@ const GetCdsView_1 = require("./tools/GetCdsView");
 const GetEmlSyntax_1 = require("./tools/GetEmlSyntax");
 const GetRapPattern_1 = require("./tools/GetRapPattern");
 const GetCboPattern_1 = require("./tools/GetCboPattern");
+const GetFioriPattern_1 = require("./tools/GetFioriPattern");
+const GetFormPattern_1 = require("./tools/GetFormPattern");
 const AcknowledgeCatalog_1 = require("./tools/AcknowledgeCatalog");
 const StaticCatalogProvider_1 = require("./src/providers/StaticCatalogProvider");
 const AzureSearchKnowledgeProvider_1 = require("./src/providers/AzureSearchKnowledgeProvider");
@@ -209,6 +211,40 @@ const TOOL_DESCRIPTORS = [
         }
     },
     {
+        name: 'get_fiori_pattern',
+        endpoint: '/tools/get-fiori-pattern',
+        description: 'Return the canonical Fiori Elements pattern (List Report / Object Page / Analytical List Page / ' +
+            'Overview Page / Worklist) or Freestyle UI5 with decision criteria. Drives the UI portion of the ' +
+            'abapObjectList for any object that has a screen, report, dashboard, or worklist.',
+        inputSchema: {
+            type: 'object',
+            required: ['scenario'],
+            properties: {
+                scenario: {
+                    type: 'string',
+                    enum: ['LIST_REPORT', 'OBJECT_PAGE', 'ANALYTICAL_LIST_PAGE', 'OVERVIEW_PAGE', 'WORKLIST', 'FREESTYLE_UI5'],
+                    description: 'Fiori UI scenario.'
+                },
+                entity_hint: { type: 'string', description: 'Optional entity name to substitute in templates.' }
+            }
+        }
+    },
+    {
+        name: 'get_form_pattern',
+        endpoint: '/tools/get-form-pattern',
+        description: 'Return the canonical SAP form pattern. Default PRINT_FORM = Adobe Forms (Level A). ' +
+            'INTERACTIVE_FORM = interactive Adobe PDF. SMART_FORM = legacy fallback with migration warning. ' +
+            'SAPscript is not exposed (long-deprecated).',
+        inputSchema: {
+            type: 'object',
+            required: ['scenario'],
+            properties: {
+                scenario: { type: 'string', enum: ['PRINT_FORM', 'INTERACTIVE_FORM', 'SMART_FORM'] },
+                form_name: { type: 'string', description: 'Optional form name to substitute into the driver template.' }
+            }
+        }
+    },
+    {
         name: 'acknowledge_catalog',
         endpoint: '/catalog/acknowledge',
         description: 'Persist a developer-acknowledged SAP exit or BAdI to the static seed catalog so future ' +
@@ -285,6 +321,12 @@ function buildApp(provider, staticProvider, providerReason) {
     });
     app.post('/tools/get-cbo-pattern', (req, res) => {
         runTool(req, res, 'get_cbo_pattern', () => (0, GetCboPattern_1.getCboPattern)(req.body));
+    });
+    app.post('/tools/get-fiori-pattern', (req, res) => {
+        runTool(req, res, 'get_fiori_pattern', () => (0, GetFioriPattern_1.getFioriPattern)(req.body));
+    });
+    app.post('/tools/get-form-pattern', (req, res) => {
+        runTool(req, res, 'get_form_pattern', () => (0, GetFormPattern_1.getFormPattern)(req.body));
     });
     // Sprint 3 — persist a developer-acknowledged SAP object to the seed catalog
     // so future runs treat it as known valid. After writing, the static provider

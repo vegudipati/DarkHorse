@@ -30,6 +30,12 @@
 import { resolveMcpPort }       from './CleanCoreVerifier';
 import { SAP_STANDARD_TABLES }  from './sapTablesCatalog';
 import { AbapObject }           from './PipelineStateManager';
+import {
+  detectFioriScenario,
+  detectFormScenario,
+  FioriScenarioGuess,
+  FormScenarioGuess
+} from './uiIntentDetect';
 
 const http = require('http');
 
@@ -41,7 +47,7 @@ export interface GroundingItem {
   /** Free-form heading shown in the system prompt block. */
   heading:  string;
   /** Tool that produced this item. */
-  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern';
+  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern';
   /** Pre-rendered markdown-ish text to inject into the prompt. */
   body:     string;
 }
@@ -54,10 +60,12 @@ export interface GroundingContext {
   grounding:        GroundingItem[];
   /** Human-readable list of the SAP tables, ops, and patterns detected — for debugging. */
   detected: {
-    sapTables:    string[];
-    writeOps:     string[];   // 'CREATE' | 'UPDATE' | 'DELETE'
-    rapScenario:  string | null;
-    needsLogging: boolean;
+    sapTables:     string[];
+    writeOps:      string[];   // 'CREATE' | 'UPDATE' | 'DELETE'
+    rapScenario:   string | null;
+    needsLogging:  boolean;
+    fioriScenario: FioriScenarioGuess | null;
+    formScenario:  FormScenarioGuess | null;
   };
 }
 
@@ -189,10 +197,12 @@ export async function groundObjectForGeneration(
   const corpus    = corpusFor(obj);
 
   const detected = {
-    sapTables:    detectSapTables(corpus),
-    writeOps:     detectWriteOps(corpus),
-    rapScenario:  detectRapScenario(obj, corpus),
-    needsLogging: detectLogging(corpus)
+    sapTables:     detectSapTables(corpus),
+    writeOps:      detectWriteOps(corpus),
+    rapScenario:   detectRapScenario(obj, corpus),
+    needsLogging:  detectLogging(corpus),
+    fioriScenario: detectFioriScenario(corpus, obj.objectType),
+    formScenario:  detectFormScenario(corpus)
   };
 
   const ctx: GroundingContext = {
@@ -208,7 +218,9 @@ export async function groundObjectForGeneration(
     detected.sapTables.length > 0 ||
     detected.writeOps.length  > 0 ||
     detected.rapScenario      !== null ||
-    detected.needsLogging;
+    detected.needsLogging ||
+    detected.fioriScenario    !== null ||
+    detected.formScenario     !== null;
   if (!hasSomething) return ctx;
 
   if (!(await isMcpUp(mcpPort))) {
@@ -251,6 +263,22 @@ export async function groundObjectForGeneration(
     calls.push(
       mcpPost(mcpPort, '/tools/get-application-log-pattern', { use_case: obj.description ?? 'GENERIC' }, 5000)
         .then(res => renderLog(res))
+        .catch(() => null)
+    );
+  }
+
+  if (detected.fioriScenario) {
+    calls.push(
+      mcpPost(mcpPort, '/tools/get-fiori-pattern', { scenario: detected.fioriScenario, entity_hint: obj.objectName }, 5000)
+        .then(res => renderFioriPattern(detected.fioriScenario!, res))
+        .catch(() => null)
+    );
+  }
+
+  if (detected.formScenario) {
+    calls.push(
+      mcpPost(mcpPort, '/tools/get-form-pattern', { scenario: detected.formScenario, form_name: obj.objectName }, 5000)
+        .then(res => renderFormPattern(detected.formScenario!, res))
         .catch(() => null)
     );
   }
@@ -335,6 +363,43 @@ function renderRapPattern(scenario: string, res: any): GroundingItem | null {
     body:
       `${d.pattern}\n\nRequired objects (this drives the TDS object list, not classic PROG/FUGR):\n${objList}\n\n` +
       `Code skeleton:\n${d.codeTemplate}`
+  };
+}
+
+function renderFioriPattern(scenario: string, res: any): GroundingItem | null {
+  if (!res?.ok || !res.data) return null;
+  const d = res.data;
+  const objList = (d.requiredObjects ?? []).map((o: any) =>
+    `  - ${o.role}: type=${o.type}, naming=${o.namingHint}`
+  ).join('\n');
+  return {
+    heading: `Fiori pattern: ${scenario}`,
+    tool:    'get_fiori_pattern',
+    body:
+      `${d.pattern}\n\n` +
+      `When to use: ${d.whenToUse}\n\n` +
+      `Required objects (must appear in the deliverable, NOT classic CL_GUI_ALV_GRID / CALL SCREEN):\n${objList}\n\n` +
+      `CDS @UI annotations:\n${d.cdsAnnotations}\n\n` +
+      `manifest.json snippet:\n${d.manifestSnippet}`
+  };
+}
+
+function renderFormPattern(scenario: string, res: any): GroundingItem | null {
+  if (!res?.ok || !res.data) return null;
+  const d = res.data;
+  const objList = (d.requiredObjects ?? []).map((o: any) =>
+    `  - ${o.role}: type=${o.type}, naming=${o.namingHint}`
+  ).join('\n');
+  const warn = d.legacyWarning ? `\nLegacy warning: ${d.legacyWarning}` : '';
+  return {
+    heading: `Form pattern: ${scenario}`,
+    tool:    'get_form_pattern',
+    body:
+      `${d.pattern}\n\n` +
+      `When to use: ${d.whenToUse}\n\n` +
+      `Required objects:\n${objList}\n\n` +
+      `Driver template:\n${d.driverTemplate}\n\n` +
+      `Do NOT: ${d.doNotUse}${warn}`
   };
 }
 

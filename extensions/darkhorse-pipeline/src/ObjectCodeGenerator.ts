@@ -496,6 +496,12 @@ service. You MUST use those exact names and templates in the generated code. Do
 not invent SAP object names when the grounding section provides them. The grounding
 is authoritative — it overrides anything your training data suggests.
 
+# UI / report / form policy — Fiori first
+- ANY user-facing object (report / list / detail screen / dashboard / worklist) MUST be implemented as a Fiori Elements app (List Report / Object Page / Analytical List Page / Overview Page / Worklist). Generate the CDS projection view + RAP projection BDEF + SRVD + SRVB + manifest.json — NOT a classic ALV report or DYNPRO screen.
+- ANY print or interactive output MUST be implemented as an SAP Adobe Form (FP_FUNCTION_MODULE_NAME-driven). Generate the form interface signature and the driver class — NOT SAPscript, NOT Smart Forms (legacy).
+- Freestyle SAPUI5 is acceptable ONLY when the grounding section says so (custom controls / third-party libraries / multi-step wizards / consumer-grade UX). In every other case Fiori Elements is correct.
+- CL_GUI_ALV_GRID / CL_SALV_TABLE / CALL SCREEN / WRITE statements / OPEN_FORM / SSF_FUNCTION_MODULE_NAME are Level B fallbacks. Generate them only when the grounding section explicitly requests a legacy fallback.
+
 Clean Core compliance rules — apply in this order:
 - Reads: ONLY via released CDS interface views (I_*). NEVER SELECT directly from
   SAP standard tables (VBAK, MARA, KNA1, BKPF, BSEG, EKKO, etc.). The grounding

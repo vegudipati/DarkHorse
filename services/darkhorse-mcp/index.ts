@@ -39,6 +39,8 @@ import { getCdsView,                GetCdsViewInput }                from './too
 import { getEmlSyntax,              GetEmlSyntaxInput }              from './tools/GetEmlSyntax';
 import { getRapPattern,             GetRapPatternInput }             from './tools/GetRapPattern';
 import { getCboPattern,             GetCboPatternInput }             from './tools/GetCboPattern';
+import { getFioriPattern,           GetFioriPatternInput }           from './tools/GetFioriPattern';
+import { getFormPattern,            GetFormPatternInput }            from './tools/GetFormPattern';
 import { acknowledgeCatalog,        AcknowledgeCatalogInput }        from './tools/AcknowledgeCatalog';
 
 import { KnowledgeProvider }            from './src/providers/KnowledgeProvider';
@@ -245,6 +247,42 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
     }
   },
   {
+    name:        'get_fiori_pattern',
+    endpoint:    '/tools/get-fiori-pattern',
+    description:
+      'Return the canonical Fiori Elements pattern (List Report / Object Page / Analytical List Page / ' +
+      'Overview Page / Worklist) or Freestyle UI5 with decision criteria. Drives the UI portion of the ' +
+      'abapObjectList for any object that has a screen, report, dashboard, or worklist.',
+    inputSchema: {
+      type: 'object',
+      required: ['scenario'],
+      properties: {
+        scenario: {
+          type: 'string',
+          enum: ['LIST_REPORT','OBJECT_PAGE','ANALYTICAL_LIST_PAGE','OVERVIEW_PAGE','WORKLIST','FREESTYLE_UI5'],
+          description: 'Fiori UI scenario.'
+        },
+        entity_hint: { type: 'string', description: 'Optional entity name to substitute in templates.' }
+      }
+    }
+  },
+  {
+    name:        'get_form_pattern',
+    endpoint:    '/tools/get-form-pattern',
+    description:
+      'Return the canonical SAP form pattern. Default PRINT_FORM = Adobe Forms (Level A). ' +
+      'INTERACTIVE_FORM = interactive Adobe PDF. SMART_FORM = legacy fallback with migration warning. ' +
+      'SAPscript is not exposed (long-deprecated).',
+    inputSchema: {
+      type: 'object',
+      required: ['scenario'],
+      properties: {
+        scenario:  { type: 'string', enum: ['PRINT_FORM','INTERACTIVE_FORM','SMART_FORM'] },
+        form_name: { type: 'string', description: 'Optional form name to substitute into the driver template.' }
+      }
+    }
+  },
+  {
     name:        'acknowledge_catalog',
     endpoint:    '/catalog/acknowledge',
     description:
@@ -348,6 +386,16 @@ function buildApp(
   app.post('/tools/get-cbo-pattern', (req: express.Request, res: express.Response) => {
     runTool(req, res, 'get_cbo_pattern', () =>
       getCboPattern(req.body as GetCboPatternInput));
+  });
+
+  app.post('/tools/get-fiori-pattern', (req: express.Request, res: express.Response) => {
+    runTool(req, res, 'get_fiori_pattern', () =>
+      getFioriPattern(req.body as GetFioriPatternInput));
+  });
+
+  app.post('/tools/get-form-pattern', (req: express.Request, res: express.Response) => {
+    runTool(req, res, 'get_form_pattern', () =>
+      getFormPattern(req.body as GetFormPatternInput));
   });
 
   // Sprint 3 — persist a developer-acknowledged SAP object to the seed catalog

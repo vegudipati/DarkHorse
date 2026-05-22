@@ -2,7 +2,7 @@
   "name": "darkhorse-pipeline",
   "displayName": "DarkHorse Pipeline",
   "description": "BR → FDS → TDS → Code pipeline for SAP RICEFW development",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "publisher": "deloitte-darkhorse",
   "engines": {
     "vscode": "^1.85.0"

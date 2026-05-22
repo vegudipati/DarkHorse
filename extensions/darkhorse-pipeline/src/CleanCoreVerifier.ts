@@ -51,7 +51,7 @@ export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D';
 export type Verdict        = 'pass' | 'warn' | 'fail' | 'skipped';
 
 export interface CleanCoreFinding {
-  category:     'exit' | 'table' | 'bapi';
+  category:     'exit' | 'table' | 'bapi' | 'ui';
   reference:    string;          // raw token found in the source
   exists:       boolean | null;  // null if the tool doesn't return existence
   level:        CleanCoreLevel | null;
@@ -81,6 +81,42 @@ export interface CleanCoreReport {
 const RX_USEREXIT = /\bUSEREXIT_[A-Z0-9_]+\b/gi;
 const RX_BAPI     = /CALL\s+FUNCTION\s+['"]\s*(BAPI_[A-Z0-9_]+)\s*['"]/gi;
 
+// Classic UI / form patterns — flagged Level B with a Fiori / Adobe Forms
+// alternative. These are not blockers (Level D blocks Accept), just advisory
+// guidance that a modern UI/forms path exists.
+const UI_FINDINGS: Array<{ rx: RegExp; reference: string; alternative: string; description: string }> = [
+  {
+    rx:          /\bCL_GUI_ALV_GRID\b/g,
+    reference:   'CL_GUI_ALV_GRID',
+    alternative: 'Fiori Elements List Report or Analytical List Page (Level A)',
+    description: 'Classic GUI ALV grid. For new development, replace with a Fiori Elements app over an OData V4 service exposed via SRVD + SRVB.'
+  },
+  {
+    rx:          /\bCL_SALV_TABLE\b/g,
+    reference:   'CL_SALV_TABLE',
+    alternative: 'Fiori Elements List Report or Analytical List Page (Level A)',
+    description: 'Newer-classic ALV (still GUI-bound, Level B). For Fiori-capable backends prefer a Fiori Elements app.'
+  },
+  {
+    rx:          /\bCALL\s+SCREEN\s+\d+/gi,
+    reference:   'CALL SCREEN',
+    alternative: 'Fiori Elements Object Page (Level A)',
+    description: 'Classic DYNPRO screen call. Replace with a Fiori Elements Object Page for any new edit/detail UI.'
+  },
+  {
+    rx:          /\bOPEN_FORM\b|\bWRITE_FORM\b|\bCLOSE_FORM\b/gi,
+    reference:   'SAPscript',
+    alternative: 'SAP Adobe Forms (FP_FUNCTION_MODULE_NAME, Level A)',
+    description: 'SAPscript is deprecated. New print/interactive output MUST use SAP Adobe Forms.'
+  },
+  {
+    rx:          /\bSSF_FUNCTION_MODULE_NAME\b/g,
+    reference:   'Smart Forms',
+    alternative: 'SAP Adobe Forms (Level A)',
+    description: 'Smart Forms are a legacy pattern. New output requirements should use SAP Adobe Forms; retain Smart Forms only for parity with an existing legacy output stack.'
+  }
+];
+
 // Match `FROM <TABLE>` and `FROM <TABLE> INTO/UP TO/WHERE/JOIN/CLIENT/AS/...`
 const RX_FROM_TABLE = /\bFROM\s+([A-Z][A-Z0-9_]+)\b/gi;
 
@@ -88,6 +124,7 @@ interface ExtractedReferences {
   exits:  Map<string, number>;
   tables: Map<string, number>;
   bapis:  Map<string, number>;
+  uis:    Map<string, number>;  // key = the canonical reference name from UI_FINDINGS
 }
 
 function tally(map: Map<string, number>, key: string): void {
@@ -98,7 +135,8 @@ function extractReferences(code: string): ExtractedReferences {
   const out: ExtractedReferences = {
     exits:  new Map<string, number>(),
     tables: new Map<string, number>(),
-    bapis:  new Map<string, number>()
+    bapis:  new Map<string, number>(),
+    uis:    new Map<string, number>()
   };
 
   for (const m of code.matchAll(RX_USEREXIT)) {
@@ -116,6 +154,14 @@ function extractReferences(code: string): ExtractedReferences {
     const candidate = (m[1] ?? '').toUpperCase();
     if (SAP_STANDARD_TABLES.has(candidate)) {
       tally(out.tables, candidate);
+    }
+  }
+
+  // Classic UI / form scans — each UI_FINDINGS entry has its own regex; we
+  // count occurrences against the reference name (CL_GUI_ALV_GRID, etc.).
+  for (const entry of UI_FINDINGS) {
+    for (const _m of code.matchAll(entry.rx)) {
+      tally(out.uis, entry.reference);
     }
   }
 
@@ -238,7 +284,10 @@ export async function verifyGeneratedCode(
   // MCP roundtrips entirely (still useful for tiny snippets and unit tests).
   const refs = extractReferences(code);
   const nothingFound =
-    refs.exits.size === 0 && refs.tables.size === 0 && refs.bapis.size === 0;
+    refs.exits.size === 0 &&
+    refs.tables.size === 0 &&
+    refs.bapis.size === 0 &&
+    refs.uis.size === 0;
 
   if (nothingFound) {
     return {
@@ -260,7 +309,7 @@ export async function verifyGeneratedCode(
     return {
       verdict:        'skipped',
       scannedAt,
-      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size,
+      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size,
       countsByLevel:  emptyCounts(),
       findings:       [],
       mcpUnavailable: true,
@@ -372,6 +421,24 @@ export async function verifyGeneratedCode(
   });
 
   await Promise.all([...exitTasks, ...tableTasks, ...bapiTasks]);
+
+  // ---- Classic UI / form patterns ----------------------------------------
+  // Deterministic — no MCP roundtrip. Pushed straight in as Level B with
+  // the Fiori / Adobe Forms alternative named in the description.
+  for (const [reference, count] of refs.uis.entries()) {
+    const entry = UI_FINDINGS.find(u => u.reference === reference);
+    if (!entry) continue;
+    findings.push({
+      category:     'ui',
+      reference:    entry.reference,
+      exists:       true,
+      level:        'B',
+      description:  entry.description,
+      alternative:  entry.alternative,
+      occurrences:  count,
+      acknowledged: ackFor(reference)
+    });
+  }
 
   // Aggregate counts and verdict — acknowledged findings are excluded so a
   // fully-acknowledged report verdicts as pass.

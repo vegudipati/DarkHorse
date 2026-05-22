@@ -25,6 +25,12 @@
 
 import { resolveMcpPort }       from './CleanCoreVerifier';
 import { SAP_STANDARD_TABLES }  from './sapTablesCatalog';
+import {
+  detectFioriScenario,
+  detectFormScenario,
+  FioriScenarioGuess,
+  FormScenarioGuess
+} from './uiIntentDetect';
 
 const http = require('http');
 
@@ -39,6 +45,8 @@ export interface FdsGroundingItem {
     | 'get_rap_pattern'
     | 'get_cbo_pattern'
     | 'get_application_log_pattern'
+    | 'get_fiori_pattern'
+    | 'get_form_pattern'
     | 'verify_badi'
     | 'verify_exit';
   body:    string;
@@ -59,6 +67,8 @@ export interface FdsGroundingContext {
     cboScenario:      string | null;
     candidateBadis:   string[];
     candidateExits:   string[];
+    fioriScenario:    FioriScenarioGuess | null;
+    formScenario:     FormScenarioGuess | null;
   };
 }
 
@@ -244,7 +254,9 @@ export async function groundBrAndSoForFds(
     needsLogging:    RX_LOGGING.test(corpus),
     cboScenario:     cboInfo.scenario,
     candidateBadis:  candBadis,
-    candidateExits:  candExits
+    candidateExits:  candExits,
+    fioriScenario:   detectFioriScenario(corpus, ricefwType),
+    formScenario:    detectFormScenario(corpus)
   };
 
   const ctx: FdsGroundingContext = {
@@ -261,7 +273,9 @@ export async function groundBrAndSoForFds(
     detected.needsCbo ||
     detected.needsLogging ||
     detected.candidateBadis.length > 0 ||
-    detected.candidateExits.length > 0;
+    detected.candidateExits.length > 0 ||
+    detected.fioriScenario !== null ||
+    detected.formScenario !== null;
   if (!hasSomething) return ctx;
 
   if (!(await isMcpUp(mcpPort))) {
@@ -310,6 +324,20 @@ export async function groundBrAndSoForFds(
     calls.push(
       mcpPost(mcpPort, '/tools/verify-exit', { exit_name: name }, 5000)
         .then(res => renderVerifiedExit(name, res))
+        .catch(() => null)
+    );
+  }
+  if (detected.fioriScenario) {
+    calls.push(
+      mcpPost(mcpPort, '/tools/get-fiori-pattern', { scenario: detected.fioriScenario }, 5000)
+        .then(res => renderFioriPattern(detected.fioriScenario!, res))
+        .catch(() => null)
+    );
+  }
+  if (detected.formScenario) {
+    calls.push(
+      mcpPost(mcpPort, '/tools/get-form-pattern', { scenario: detected.formScenario }, 5000)
+        .then(res => renderFormPattern(detected.formScenario!, res))
         .catch(() => null)
     );
   }
@@ -391,6 +419,34 @@ function renderVerifiedBadi(name: string, res: any): FdsGroundingItem | null {
     heading: `BAdI ${name} — verified (Level ${d.level ?? '?'})`,
     tool:    'verify_badi',
     body:    `${name} is a valid released BAdI (Level ${d.level ?? '?'}, module ${d.module ?? '?'}). It is safe to reference in the FDS. ${d.description ?? ''}`
+  };
+}
+
+function renderFioriPattern(scenario: string, res: any): FdsGroundingItem | null {
+  if (!res?.ok || !res.data) return null;
+  const d = res.data;
+  return {
+    heading: `Fiori pattern: ${scenario}`,
+    tool:    'get_fiori_pattern',
+    body:
+      `${d.pattern}\n\n` +
+      `When to use: ${d.whenToUse}\n` +
+      `Describe the UI in uiDesign as a Fiori Elements ${scenario} app (not "selection screen" / "ALV grid"). ` +
+      `List the @UI annotations and required SRVD/SRVB service in inputOutputSpec.`
+  };
+}
+
+function renderFormPattern(scenario: string, res: any): FdsGroundingItem | null {
+  if (!res?.ok || !res.data) return null;
+  const d = res.data;
+  const warn = d.legacyWarning ? `\nLegacy warning: ${d.legacyWarning}` : '';
+  return {
+    heading: `Form pattern: ${scenario}`,
+    tool:    'get_form_pattern',
+    body:
+      `${d.pattern}\nDescribe the form in the FDS as an Adobe Forms output ` +
+      `(not SAPscript / Smart Forms unless explicitly required). Document the form interface ` +
+      `parameters in inputOutputSpec. Do NOT: ${d.doNotUse}${warn}`
   };
 }
 

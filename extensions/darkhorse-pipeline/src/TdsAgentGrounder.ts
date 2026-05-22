@@ -25,6 +25,12 @@
 
 import { resolveMcpPort }       from './CleanCoreVerifier';
 import { SAP_STANDARD_TABLES }  from './sapTablesCatalog';
+import {
+  detectFioriScenario,
+  detectFormScenario,
+  FioriScenarioGuess,
+  FormScenarioGuess
+} from './uiIntentDetect';
 
 const http = require('http');
 
@@ -38,7 +44,9 @@ export interface TdsGroundingItem {
     | 'get_cds_view'
     | 'get_rap_pattern'
     | 'get_cbo_pattern'
-    | 'get_application_log_pattern';
+    | 'get_application_log_pattern'
+    | 'get_fiori_pattern'
+    | 'get_form_pattern';
   body:    string;
 }
 
@@ -55,6 +63,8 @@ export interface TdsGroundingContext {
     needsLogging:    boolean;
     rapScenario:     string | null;
     cboScenario:     string | null;
+    fioriScenario:   FioriScenarioGuess | null;
+    formScenario:    FormScenarioGuess | null;
   };
 }
 
@@ -228,7 +238,9 @@ export async function groundFdsForTds(
     needsCbo:        cboInfo.needsCbo,
     needsLogging:    RX_LOGGING.test(corpus),
     rapScenario:     scenarioInfo.rapScenario,
-    cboScenario:     cboInfo.scenario
+    cboScenario:     cboInfo.scenario,
+    fioriScenario:   detectFioriScenario(corpus, ricefwType),
+    formScenario:    detectFormScenario(corpus)
   };
 
   const ctx: TdsGroundingContext = {
@@ -243,7 +255,9 @@ export async function groundFdsForTds(
     detected.sapTables.length > 0 ||
     detected.rapScenario !== null ||
     detected.needsCbo ||
-    detected.needsLogging;
+    detected.needsLogging ||
+    detected.fioriScenario !== null ||
+    detected.formScenario !== null;
   if (!hasSomething) return ctx;
 
   if (!(await isMcpUp(mcpPort))) {
@@ -273,6 +287,22 @@ export async function groundFdsForTds(
     calls.push(
       mcpPost(mcpPort, '/tools/get-cds-view', { sap_table: table }, 5000)
         .then(res => renderCdsView(table, res))
+        .catch(() => null)
+    );
+  }
+
+  if (detected.fioriScenario) {
+    calls.push(
+      mcpPost(mcpPort, '/tools/get-fiori-pattern', { scenario: detected.fioriScenario }, 5000)
+        .then(res => renderFioriPattern(detected.fioriScenario!, res))
+        .catch(() => null)
+    );
+  }
+
+  if (detected.formScenario) {
+    calls.push(
+      mcpPost(mcpPort, '/tools/get-form-pattern', { scenario: detected.formScenario }, 5000)
+        .then(res => renderFormPattern(detected.formScenario!, res))
         .catch(() => null)
     );
   }
@@ -355,6 +385,43 @@ function renderCdsView(table: string, res: any): TdsGroundingItem | null {
     heading: `Read access for ${table} -> ${d.viewName}`,
     tool:    'get_cds_view',
     body:    `Use released CDS view ${d.viewName} (Level ${d.viewLevel}) in place of direct SELECT FROM ${table}. The TDS pseudocode for any "read ${table}" step should reference ${d.viewName}.`
+  };
+}
+
+function renderFioriPattern(scenario: string, res: any): TdsGroundingItem | null {
+  if (!res?.ok || !res.data) return null;
+  const d = res.data;
+  const objList = (d.requiredObjects ?? []).map((o: any) =>
+    `  - ${o.role}: type=${o.type}, naming=${o.namingHint}${o.notes ? ' — ' + o.notes : ''}`
+  ).join('\n');
+  return {
+    heading: `Fiori pattern: ${scenario}`,
+    tool:    'get_fiori_pattern',
+    body:
+      `${d.pattern}\n\n` +
+      `When to use: ${d.whenToUse}\n\n` +
+      `Required objects — these MUST appear in the TDS abapObjectList for any UI-bearing ` +
+      `object (CDS + SRVD + SRVB + UI5 app):\n${objList}\n\n` +
+      `CDS @UI annotations to paste into the projection CDS:\n${d.cdsAnnotations}`
+  };
+}
+
+function renderFormPattern(scenario: string, res: any): TdsGroundingItem | null {
+  if (!res?.ok || !res.data) return null;
+  const d = res.data;
+  const objList = (d.requiredObjects ?? []).map((o: any) =>
+    `  - ${o.role}: type=${o.type}, naming=${o.namingHint}${o.notes ? ' — ' + o.notes : ''}`
+  ).join('\n');
+  const warn = d.legacyWarning ? `\nLegacy warning: ${d.legacyWarning}` : '';
+  return {
+    heading: `Form pattern: ${scenario}`,
+    tool:    'get_form_pattern',
+    body:
+      `${d.pattern}\n\n` +
+      `When to use: ${d.whenToUse}\n\n` +
+      `Required objects:\n${objList}\n\n` +
+      `Driver template:\n${d.driverTemplate}\n\n` +
+      `Do NOT: ${d.doNotUse}${warn}`
   };
 }
 

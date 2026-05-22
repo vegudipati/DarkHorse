@@ -26,6 +26,12 @@
 
 import { resolveMcpPort }       from './CleanCoreVerifier';
 import { SAP_STANDARD_TABLES }  from './sapTablesCatalog';
+import {
+  detectFioriScenario,
+  detectFormScenario,
+  FioriScenarioGuess,
+  FormScenarioGuess
+} from './uiIntentDetect';
 
 const http = require('http');
 
@@ -39,7 +45,9 @@ export interface SoGroundingItem {
     | 'get_cds_view'
     | 'get_rap_pattern'
     | 'get_cbo_pattern'
-    | 'get_application_log_pattern';
+    | 'get_application_log_pattern'
+    | 'get_fiori_pattern'
+    | 'get_form_pattern';
   body:    string;
 }
 
@@ -56,6 +64,8 @@ export interface SoGroundingContext {
     needsCbo:        boolean;
     needsLogging:    boolean;
     cboScenario:     string | null;
+    fioriScenario:   FioriScenarioGuess | null;
+    formScenario:    FormScenarioGuess | null;
   };
 }
 
@@ -189,7 +199,9 @@ export async function groundBrForSo(
     isAnalytical:    scenarioInfo.isAnalytical,
     needsCbo:        cboInfo.needsCbo,
     needsLogging:    RX_LOGGING.test(corpus),
-    cboScenario:     cboInfo.scenario
+    cboScenario:     cboInfo.scenario,
+    fioriScenario:   detectFioriScenario(corpus, ricefwType),
+    formScenario:    detectFormScenario(corpus)
   };
 
   const ctx: SoGroundingContext = {
@@ -204,7 +216,9 @@ export async function groundBrForSo(
     detected.sapTables.length > 0 ||
     detected.rapScenario !== null ||
     detected.needsCbo ||
-    detected.needsLogging;
+    detected.needsLogging ||
+    detected.fioriScenario !== null ||
+    detected.formScenario !== null;
   if (!hasSomething) return ctx;
 
   if (!(await isMcpUp(mcpPort))) {
@@ -242,10 +256,50 @@ export async function groundBrForSo(
         .catch(() => null)
     );
   }
+  if (detected.fioriScenario) {
+    calls.push(
+      mcpPost(mcpPort, '/tools/get-fiori-pattern', { scenario: detected.fioriScenario }, 5000)
+        .then(res => renderFioriPattern(detected.fioriScenario!, res))
+        .catch(() => null)
+    );
+  }
+  if (detected.formScenario) {
+    calls.push(
+      mcpPost(mcpPort, '/tools/get-form-pattern', { scenario: detected.formScenario }, 5000)
+        .then(res => renderFormPattern(detected.formScenario!, res))
+        .catch(() => null)
+    );
+  }
 
   const results = await Promise.all(calls);
   for (const r of results) if (r) ctx.grounding.push(r);
   return ctx;
+}
+
+function renderFioriPattern(scenario: string, res: any): SoGroundingItem | null {
+  if (!res?.ok || !res.data) return null;
+  const d = res.data;
+  return {
+    heading: `Fiori pattern: ${scenario}`,
+    tool:    'get_fiori_pattern',
+    body:
+      `${d.pattern}\n` +
+      `Reflect this as a Level ${d.cleanCoreLevel} component in the SO cleanCoreAlignment ` +
+      `(e.g. "Fiori Elements ${scenario}" rather than "Custom ABAP screen").`
+  };
+}
+
+function renderFormPattern(scenario: string, res: any): SoGroundingItem | null {
+  if (!res?.ok || !res.data) return null;
+  const d = res.data;
+  return {
+    heading: `Form pattern: ${scenario}`,
+    tool:    'get_form_pattern',
+    body:
+      `${d.pattern}\n` +
+      `Reflect this as a Level ${d.cleanCoreLevel} component in the SO ` +
+      `(e.g. "Adobe Form" / "Smart Form" — not "SAPscript"). ${d.doNotUse}`
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -167,6 +167,10 @@ RULES:
 8. Never recommend direct SELECT on SAP core tables without a released CDS View wrapper
 9. The overallCleanCoreLevel must be the LOWEST level among all components
 10. Be specific about which released APIs are being used — reference SAP API names
+11. UI / report / form policy — Fiori first:
+    - Any UI / report / dashboard component MUST be modeled as a Fiori Elements app (List Report / Object Page / Analytical List Page / Overview Page / Worklist). Reflect this as a Level A component in cleanCoreAlignment. Do NOT propose "ALV report" / "selection screen" / "SAP GUI screen" as the solution unless the BR explicitly requires a legacy SAP GUI integration.
+    - Any print or interactive form MUST be modeled as an SAP Adobe Form (Level A). NEVER propose Smart Forms (Level B legacy) or SAPscript (deprecated) for new development.
+    - Freestyle SAPUI5 is the EXCEPTION (~20% — custom controls / third-party libraries / multi-step wizards / consumer-grade UX). In that case document the justification in solutionDetails.
 
 Return ONLY valid JSON. No markdown. No preamble.`;
   }

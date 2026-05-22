@@ -214,6 +214,14 @@ Example: if the grounding proposes ZI_VBAK as a wrapper for VBAK, the abapObject
 ]
 
 
+# UI policy — Fiori Elements default (80/20 rule)
+
+- Any user-facing object MUST be modeled as a Fiori Elements app. abapObjectList for a UI-bearing object includes: the data-model CDS (DDLS), the projection CDS (DDLS), the projection BDEF (BDEF), the SRVD, the SRVB, and a "UI5 application" entry pointing at sap.fe.templates.<Template>.
+- Template selection: List Report (tabular browse), Object Page (single-item detail), Analytical List Page (reports/KPIs — REPLACES classic ALV), Overview Page (dashboard), Worklist (approval inbox).
+- Freestyle SAPUI5 is the EXCEPTION (~20%) — only when custom controls, third-party libraries (D3/Leaflet), guided wizards, or consumer-grade UX are required. The technicalApproach MUST document the justification.
+- Print / interactive forms MUST be modeled as SAP Adobe Forms (form interface + form layout + driver class). NEVER propose Smart Forms or SAPscript for new development; Smart Forms can be retained only for parity with existing legacy stacks.
+- Classic ABAP UI (CL_SALV_TABLE / CL_GUI_ALV_GRID / CALL SCREEN / WRITE statements) is a Level B fallback. Use only when the grounding section indicates no Fiori path is feasible AND document why in designDecisions.
+
 # Default object-type policy (apply when the grounding section is silent or absent)
 
 - TRANSACTIONAL business object on S/4HANA Cloud / Private edition:
