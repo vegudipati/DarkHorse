@@ -2,7 +2,7 @@
   "name": "darkhorse-pipeline",
   "displayName": "DarkHorse Pipeline",
   "description": "BR → FDS → TDS → Code pipeline for SAP RICEFW development",
-  "version": "0.6.7",
+  "version": "0.7.3",
   "publisher": "deloitte-darkhorse",
   "engines": {
     "vscode": "^1.85.0"
@@ -52,6 +52,10 @@
       {
         "command": "darkhorse.pipeline.resetCodeGen",
         "title": "DarkHorse: Reset Code Generation"
+      },
+      {
+        "command": "darkhorse.pipeline.captureCorrections",
+        "title": "DarkHorse: Capture Corrections"
       }
     ],
     "configuration": {

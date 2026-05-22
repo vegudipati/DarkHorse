@@ -55,6 +55,10 @@ export interface AbapObject {
   dependencies: string[];
   codeGenerated: boolean;
   codeAccepted: boolean;
+  /** The exact code the LLM produced and the developer accepted. Stored so
+   *  the Correction Store can diff the developer's later edits against the
+   *  original AI output. Captured by ObjectCodeGenerator on Accept. */
+  generatedCode?: string;
 }
 
 export interface PipelineState {

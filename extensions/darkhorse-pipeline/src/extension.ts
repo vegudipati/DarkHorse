@@ -99,6 +99,17 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Command: Capture corrections — CPI-6 Sprint 6 Session 3.
+  // Diffs each accepted .abap file in the output folder against the AI code
+  // saved on state.abapObjects[i].generatedCode and writes per-object
+  // correction JSON files for any deltas.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.captureCorrections', async () => {
+      const { runCaptureCorrectionsCommand } = require('./CorrectionStore');
+      await runCaptureCorrectionsCommand(stateManager);
+    })
+  );
+
   // Command: Clear pipeline
   context.subscriptions.push(
     vscode.commands.registerCommand('darkhorse.pipeline.clearPipeline', async () => {

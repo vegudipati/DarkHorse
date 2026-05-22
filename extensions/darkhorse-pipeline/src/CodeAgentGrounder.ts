@@ -270,6 +270,26 @@ function renderCdsView(table: string, res: any): GroundingItem | null {
   if (!res?.ok || !res.data) return null;
   const d = res.data;
   if (!d.found) {
+    // Sprint 6 step (B): if MCP proposed a Z wrapper view, instruct the Code
+    // Agent to SELECT from the proposed view. The TDS Agent grounding already
+    // told the upstream pipeline to include the Z view as a separate DDLS
+    // object — so by the time we reach code generation, that DDLS either is
+    // being generated in the same deliverable (this object loop) or has
+    // already been accepted.
+    if (d.proposed && d.proposed.name) {
+      return {
+        heading: `Read access for ${table} -> ${d.proposed.name} (wrapper)`,
+        tool:    'get_cds_view',
+        body:
+          `No released CDS view exists for ${table}. A wrapper Z CDS view ${d.proposed.name} ` +
+          `is being created as a separate DDLS object in this deliverable. ` +
+          `If your generated ABAP needs to read ${table}, SELECT FROM ${d.proposed.name} ` +
+          `(Level ${d.proposed.level}) — NOT FROM ${table} directly.\n\n` +
+          `If you are CURRENTLY generating the DDLS object ${d.proposed.name}, paste this template ` +
+          `and populate the field list from the TDS inputOutputSpec:\n\n` +
+          d.proposed.template
+      };
+    }
     return {
       heading: `Read access for ${table}`,
       tool:    'get_cds_view',

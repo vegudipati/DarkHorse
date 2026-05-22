@@ -4,6 +4,12 @@ import { PipelineStateManager } from './PipelineStateManager';
 import { PipelineTracker } from './PipelineTracker';
 import { ReferenceDocLoader } from './ReferenceDocLoader';
 import { DocxWriter } from './DocxWriter';
+import { resolveMcpPort } from './CleanCoreVerifier';
+import {
+  groundBrAndSoForFds,
+  renderFdsGroundingForPrompt,
+  FdsGroundingContext
+} from './FdsAgentGrounder';
 
 export interface FdsSection {
   businessBackground: string;
@@ -72,11 +78,29 @@ export class FdsGenerator {
       location: vscode.ProgressLocation.Notification,
       title: 'DarkHorse: Generating Functional Design Specification...',
       cancellable: false
-    }, async () => {
+    }, async (progress) => {
       try {
-        // Build FDS prompt
-        const prompt = FdsGenerator.buildPrompt(state.brText, state.ricefwType,
-          state.objectType, state.sapPackage, styleContext);
+        // CPI-6 Sprint 5 — ground the FDS Agent against MCP before generation.
+        // Pulls in CDS view names, RAP/CBO patterns, verified BAdI/exit names
+        // from both the BR and the approved Solution Overview.
+        progress.report({ message: 'Grounding via MCP...' });
+        let groundingContext: FdsGroundingContext | undefined;
+        try {
+          groundingContext = await groundBrAndSoForFds(
+            state.brText,
+            state.solutionOverview,
+            state.ricefwType,
+            resolveMcpPort()
+          );
+        } catch (err: any) {
+          console.error('DarkHorse: FdsAgentGrounder threw:', err?.message ?? err);
+        }
+
+        progress.report({ message: 'Calling AI...' });
+        const prompt = FdsGenerator.buildPrompt(
+          state.brText, state.ricefwType, state.objectType, state.sapPackage,
+          styleContext, groundingContext
+        );
 
         // Call LLM proxy
         const rawContent = await FdsGenerator.callProxy(proxyPort, {
@@ -155,8 +179,14 @@ export class FdsGenerator {
     ricefwType: string,
     objectType: string,
     sapPackage: string,
-    styleContext: string
+    styleContext: string,
+    groundingContext?: FdsGroundingContext
   ): string {
+    const groundingBlock = groundingContext
+      ? renderFdsGroundingForPrompt(groundingContext)
+      : '';
+    const groundingSection = groundingBlock ? `\n\n${groundingBlock}\n` : '';
+
     return `Generate a detailed, professional Functional Design Specification for this SAP ${ricefwType} development. This document will be reviewed by senior SAP consultants and must be production-quality.
 
 BUSINESS REQUIREMENT:
@@ -164,11 +194,12 @@ ${brText}
 
 TECHNICAL CONTEXT:
 - RICEFW Type: ${ricefwType}
-- Primary Object Type: ${objectType}  
+- Primary Object Type: ${objectType}
 - SAP Package: ${sapPackage || 'Z-package TBD'}
 
 STYLE GUIDE:
 ${styleContext}
+${groundingSection}
 
 CRITICAL REQUIREMENTS FOR EACH SECTION:
 1. businessBackground: 2-3 paragraphs. Include: which SAP module is affected, current business pain point, business value of this development, impacted business roles/departments.

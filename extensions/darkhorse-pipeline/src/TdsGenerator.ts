@@ -5,6 +5,12 @@ import { PipelineTracker } from './PipelineTracker';
 import { ReferenceDocLoader } from './ReferenceDocLoader';
 import { DocxWriter, TdsDocument } from './DocxWriter';
 import { FdsDocument } from './FdsGenerator';
+import { resolveMcpPort } from './CleanCoreVerifier';
+import {
+  groundFdsForTds,
+  renderTdsGroundingForPrompt,
+  TdsGroundingContext
+} from './TdsAgentGrounder';
 
 export { TdsDocument };
 
@@ -46,9 +52,22 @@ export class TdsGenerator {
       location: vscode.ProgressLocation.Notification,
       title: 'DarkHorse: Generating Technical Design Specification...',
       cancellable: false
-    }, async () => {
+    }, async (progress) => {
       try {
-        const prompt = TdsGenerator.buildPrompt(fdsDoc, state.ricefwType, styleContext);
+        // CPI-6 Sprint 4 — ground the TDS Agent BEFORE generation. The grounder
+        // analyzes the FDS and queries MCP for the right RAP / CBO / CDS / SLG1
+        // patterns, then injects them into the user prompt so the TDS picks
+        // the correct object types instead of defaulting to classic PROG/FUGR.
+        progress.report({ message: 'Grounding via MCP...' });
+        let groundingContext: TdsGroundingContext | undefined;
+        try {
+          groundingContext = await groundFdsForTds(fdsDoc, state.ricefwType, resolveMcpPort());
+        } catch (err: any) {
+          console.error('DarkHorse: TdsAgentGrounder threw:', err?.message ?? err);
+        }
+
+        progress.report({ message: 'Calling AI...' });
+        const prompt = TdsGenerator.buildPrompt(fdsDoc, state.ricefwType, styleContext, groundingContext);
 
         const rawContent = await TdsGenerator.callProxy(proxyPort, {
           prompt,
@@ -95,7 +114,8 @@ export class TdsGenerator {
 private static buildPrompt(
     fds: FdsDocument,
     ricefwType: string,
-    styleContext: string
+    styleContext: string,
+    groundingContext?: TdsGroundingContext
   ): string {
 
     const frList = fds.sections.functionalRequirements
@@ -107,6 +127,11 @@ private static buildPrompt(
     const frSummary = frList.length > 1500 ? frList.substring(0, 1500) + '...' : frList;
     const rulesSummary = fds.sections.businessRules.slice(0, 5).join('\n');
     const authSummary = fds.sections.authorization.substring(0, 200);
+
+    const groundingBlock = groundingContext
+      ? renderTdsGroundingForPrompt(groundingContext)
+      : '';
+    const groundingSection = groundingBlock ? `\n\n${groundingBlock}\n` : '';
 
     return `Generate a detailed Technical Design Specification for this SAP ${ricefwType} development.
 
@@ -128,15 +153,15 @@ ${authSummary}
 
 Style Guide:
 ${styleContext.substring(0, 300)}
-
+${groundingSection}
 CRITICAL REQUIREMENTS:
-1. technicalApproach: 2-3 paragraphs, architecture approach, ABAP design patterns, key decisions
+1. technicalApproach: 2-3 paragraphs. If the grounding section identifies a RAP pattern, the approach MUST describe a RAP layered implementation (CDS + BDEF + behavior pool + projection + SRVD + SRVB). Only fall back to classic PROG/FUGR when no RAP/CDS path applies (e.g. pure batch utility with no business object).
 2. designDecisions: minimum 5 specific technical decisions with rationale
-3. abapObjectList: each object needs 8-10 keyLogic steps as pseudocode with SAP table/field refs, all dependencies
-4. dataDictionary: every SAP table used, key fields, any custom tables with field definitions
-5. programLogic: pseudocode with SAP API calls, FM names, BAdI names
-6. dbDesign: SELECT strategies, indexes, performance for data volumes
-7. errorHandling: SY-SUBRC checks, SLG1 application log, message class and numbers
+3. abapObjectList: objectType values MUST come from the grounding section when one was provided — typical RAP set is { DDLS, BDEF, CLAS, SRVD, SRVB } for transactional / DDLS-only for analytical / the full CBO 7-piece set for new custom persistent data. Use PROG / FUGR / TABL only as a last resort and only when nothing in the grounding applies.
+4. dataDictionary: when reading SAP standard tables, reference the released CDS view named in the grounding (e.g. I_SalesOrder instead of VBAK) — do NOT propose direct SELECTs.
+5. programLogic: pseudocode with SAP API calls. For RAP behavior implementations write EML pseudocode (READ ENTITIES OF, MODIFY ENTITIES OF). For analytical views write CDS projection pseudocode.
+6. dbDesign: explain CDS view selection, key associations, performance considerations. Never recommend direct table SELECTs when a released CDS view exists.
+7. errorHandling: SY-SUBRC checks, SLG1 Application Log usage (object Z_DARKHORSE + subobject per scenario), message class and numbers. Never propose a custom Z log table.
 8. testScenarios: minimum 5 with exact input values and expected SY-SUBRC
 
 Return ONLY valid JSON. No markdown. No explanation:
@@ -147,11 +172,11 @@ Return ONLY valid JSON. No markdown. No explanation:
     "abapObjectList": [
       {
         "sequence": 1,
-        "objectType": "PROG",
-        "objectName": "ZXXX_OBJECT_NAME",
-        "description": "string",
-        "keyLogic": ["Step 1: SELECT...", "Step 2: ..."],
-        "dependencies": ["Table: KNA1", "FM: CONVERSION_EXIT_ALPHA_INPUT"]
+        "objectType": "BDEF",
+        "objectName": "ZI_<Entity>",
+        "description": "Managed RAP Behavior Definition for the custom BO",
+        "keyLogic": ["Step 1: define CRUD operations", "Step 2: declare validations / determinations"],
+        "dependencies": ["CDS: ZI_<Entity>", "Class: ZBP_I_<Entity>"]
       }
     ],
     "dataDictionary": "string",
@@ -169,17 +194,92 @@ Return ONLY valid JSON. No markdown. No explanation:
   }
 
   private static getSystemPrompt(): string {
-    return `You are a senior SAP S/4HANA technical architect at a Big 4 consulting firm with 15 years of ABAP development experience writing production-quality Technical Design Specifications.
+    return `You are a senior SAP S/4HANA technical architect at a Big 4 consulting firm with 15 years of experience writing Clean Core compliant Technical Design Specifications for the RAP-era SAP stack.
 
-Your TDS documents are known for:
-- Writing pseudocode with exact SAP table/field references (SELECT MATNR WERKS FROM MARC WHERE...)
-- Specifying exact ABAP class names, method names, parameter types
-- Referencing SAP function modules by exact name (CONVERSION_EXIT_ALPHA_INPUT, REUSE_ALV_GRID_DISPLAY)
-- Using proper ABAP data types (TYPE REF TO, TYPE TABLE OF, LIKE LINE OF)
-- Specifying BAdI names, enhancement spots, user exit names
-- Writing test scenarios with specific input values and expected SY-SUBRC values
-- Naming custom tables with Z prefix following SAP naming conventions
-- Being specific about transport strategy — Workbench vs Customizing, sequence
+The user prompt MAY include a "## Grounded SAP knowledge for TDS object planning (CPI-6 Sprint 4)" section. If present, that section is AUTHORITATIVE for choosing object types in the abapObjectList. You MUST use the SAP object types it lists (DDLS, BDEF, CLAS, SRVD, SRVB, TABL for CBOs) and the CDS view names it provides for SAP standard table reads.
+
+# CPI-6 step (B) — proposed Z wrapper CDS views
+
+When the grounding section proposes a Z CDS view because no released view exists for a SAP standard table (heading reads "Read access for <TABLE> -> propose ZI_<TABLE> (wrapper DDLS)"):
+
+1. **You MUST add the proposed view as a SEPARATE DDLS object in the abapObjectList**, with its own sequence number, BEFORE the program that consumes it.
+2. **The keyLogic for the wrapper DDLS object must list "paste the DDL template from the grounding" and "populate the SELECT field list from inputOutputSpec".**
+3. **The dependencies for the consuming program must reference the wrapper DDLS name** (e.g. "DDLS: ZI_VBAK"), NOT the underlying SAP table.
+4. **All keyLogic steps in the consuming program that read the SAP table MUST reference the wrapper view name**, not the table.
+
+Example: if the grounding proposes ZI_VBAK as a wrapper for VBAK, the abapObjectList should look like:
+[
+  { sequence: 1, objectType: "DDLS", objectName: "ZI_VBAK", description: "Wrapper CDS view over VBAK — Level B; selected fields driven by the FDS", keyLogic: ["Paste the DDL template from the grounding section.", "List only the fields the consuming report needs: VBELN, VKORG, KUNNR, NETWR, ERDAT."], dependencies: ["Table: VBAK (Level C — direct SELECT prohibited; this view is the contract)"] },
+  { sequence: 2, objectType: "PROG", objectName: "ZSALES_REPORT", description: "Sales order report", keyLogic: ["SELECT * FROM ZI_VBAK ..."], dependencies: ["DDLS: ZI_VBAK"] }
+]
+
+
+# Default object-type policy (apply when the grounding section is silent or absent)
+
+- TRANSACTIONAL business object on S/4HANA Cloud / Private edition:
+  abapObjectList = [
+    DDLS  ZI_<Entity>             — interface CDS view (data model layer),
+    BDEF  ZI_<Entity>             — managed Behavior Definition,
+    CLAS  ZBP_I_<Entity>          — behavior pool implementation,
+    DDLS  ZC_<Entity>             — projection CDS view (consumption layer),
+    BDEF  ZC_<Entity>             — projection BDEF,
+    SRVD  ZUI_<Entity>            — Service Definition,
+    SRVB  ZUI_<Entity>_O4         — OData V4 Service Binding.
+  ]
+  NOT a single PROG with INSERTs.
+
+- READ-ONLY ANALYTICAL / report exposed as a Fiori analytical app:
+  abapObjectList = [
+    DDLS  ZI_<Report>             — interface CDS,
+    DDLS  ZC_<Report>             — projection CDS with @Analytics annotations,
+    SRVD  ZUI_<Report>            — Service Definition,
+    SRVB  ZUI_<Report>_O4         — Service Binding.
+  ]
+  NOT a single PROG with SELECT and CL_SALV_TABLE — only fall back to classic ALV when the FDS explicitly requires a SE38 / SA38 launch (no Fiori UI).
+
+- New PERSISTENT CUSTOM DATA (CBO):
+  abapObjectList = [
+    TABL  Z<Entity>               — transparent table,
+    DDLS  ZI_<Entity>             — interface CDS,
+    BDEF  ZI_<Entity>             — managed BDEF,
+    CLAS  ZBP_I_<Entity>          — behavior pool,
+    DDLS  ZC_<Entity>             — projection CDS,
+    BDEF  ZC_<Entity>             — projection BDEF,
+    SRVD  ZUI_<Entity>,
+    SRVB  ZUI_<Entity>_O4.
+  ]
+  NOT just a TABL with direct INSERT.
+
+- All logging: SLG1 Application Log via BAL_LOG_CREATE / BAL_LOG_MSG_ADD / BAL_DB_SAVE.
+  NEVER design a custom Z log table.
+
+# Few-shot example — Backorder enhancement TDS (transactional)
+
+WRONG abapObjectList (classic):
+[
+  { sequence:1, objectType:"PROG", objectName:"ZBACKORDER_PROCESS",  description:"Main program" },
+  { sequence:2, objectType:"FUGR", objectName:"ZBACKORDER_UTILS",    description:"Helper FMs" },
+  { sequence:3, objectType:"TABL", objectName:"ZBACKORDER_LOG",      description:"Log table" }
+]
+
+CORRECT abapObjectList (Clean Core Level A):
+[
+  { sequence:1, objectType:"DDLS", objectName:"ZI_BackorderEnh",     description:"Interface CDS over backorder header" },
+  { sequence:2, objectType:"BDEF", objectName:"ZI_BackorderEnh",     description:"Managed BDEF with create/update/delete + validations" },
+  { sequence:3, objectType:"CLAS", objectName:"ZBP_I_BACKORDERENH",  description:"Behavior pool — ATP determinations and validations" },
+  { sequence:4, objectType:"DDLS", objectName:"ZC_BackorderEnh",     description:"Projection CDS with UI annotations" },
+  { sequence:5, objectType:"BDEF", objectName:"ZC_BackorderEnh",     description:"Projection BDEF" },
+  { sequence:6, objectType:"SRVD", objectName:"ZUI_BackorderEnh",    description:"Service Definition for OData exposure" },
+  { sequence:7, objectType:"SRVB", objectName:"ZUI_BackorderEnh_O4", description:"OData V4 Service Binding for Fiori Elements" }
+]
+
+# Naming conventions
+- CDS interface views: ZI_<Entity>
+- CDS projection views: ZC_<Entity>
+- Behavior pool classes: ZBP_I_<Entity> (interface), ZBP_C_<Entity> (consumption-rare)
+- Service Definitions: ZUI_<Entity>
+- Service Bindings: ZUI_<Entity>_O4 (OData V4) or ZUI_<Entity>_O2 (OData V2 — only when legacy clients require it)
+- CBO transparent tables: Z<Entity>
 
 Return ONLY valid JSON. No markdown fences. No preamble. No explanation.`;
   }

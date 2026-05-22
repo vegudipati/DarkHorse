@@ -1,6 +1,12 @@
 import * as vscode from 'vscode';
 import { PipelineStateManager, SolutionOverview } from './PipelineStateManager';
 import { PipelineTracker } from './PipelineTracker';
+import { resolveMcpPort } from './CleanCoreVerifier';
+import {
+  groundBrForSo,
+  renderSoGroundingForPrompt,
+  SoGroundingContext
+} from './SoAgentGrounder';
 
 export class SolutionOverviewGenerator {
 
@@ -26,10 +32,22 @@ export class SolutionOverviewGenerator {
       location: vscode.ProgressLocation.Notification,
       title: 'DarkHorse: Generating Solution Overview & Clean Core Assessment...',
       cancellable: false
-    }, async () => {
+    }, async (progress) => {
       try {
+        // CPI-6 Sprint 5 — ground the SO Agent against MCP before generation.
+        // Fails-open: if MCP is unreachable, generation proceeds without the
+        // grounding block.
+        progress.report({ message: 'Grounding via MCP...' });
+        let groundingContext: SoGroundingContext | undefined;
+        try {
+          groundingContext = await groundBrForSo(state.brText, state.ricefwType, resolveMcpPort());
+        } catch (err: any) {
+          console.error('DarkHorse: SoAgentGrounder threw:', err?.message ?? err);
+        }
+
+        progress.report({ message: 'Calling AI...' });
         const prompt = SolutionOverviewGenerator.buildPrompt(
-          state.brText, state.ricefwType, state.objectType, state.sapPackage
+          state.brText, state.ricefwType, state.objectType, state.sapPackage, groundingContext
         );
 
         const rawContent = await SolutionOverviewGenerator.callProxy(proxyPort, {
@@ -61,8 +79,14 @@ export class SolutionOverviewGenerator {
     brText: string,
     ricefwType: string,
     objectType: string,
-    sapPackage: string
+    sapPackage: string,
+    groundingContext?: SoGroundingContext
   ): string {
+    const groundingBlock = groundingContext
+      ? renderSoGroundingForPrompt(groundingContext)
+      : '';
+    const groundingSection = groundingBlock ? `\n\n${groundingBlock}\n` : '';
+
     return `Analyze this SAP ${ricefwType} Business Requirement and generate a Solution Overview with Clean Core compliance assessment.
 
 BUSINESS REQUIREMENT:
@@ -71,6 +95,7 @@ ${brText.substring(0, 2000)}
 RICEFW TYPE: ${ricefwType}
 PRIMARY OBJECT TYPE: ${objectType}
 SAP PACKAGE: ${sapPackage || 'Z-package TBD'}
+${groundingSection}
 
 CLEAN CORE LEVELS (SAP 2025 A-D Model):
 - Level A: Released APIs only — RAP, CDS Views (released), released BAdIs, Key User tools, OData via RAP, BTP/CAP side-by-side

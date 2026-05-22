@@ -14,6 +14,16 @@ import {
   renderGroundingForPrompt,
   GroundingContext
 } from './CodeAgentGrounder';
+import {
+  reviewGeneratedCode,
+  ReviewReport,
+  ReviewFinding,
+  ReviewSeverity
+} from './ReviewAgent';
+import {
+  applyCdsAutoFix,
+  AutoFixSummary
+} from './CleanCoreAutoFix';
 
 export class ObjectCodeGenerator {
 
@@ -105,7 +115,7 @@ export class ObjectCodeGenerator {
     // Show preview. The regenerator lets the developer acknowledge "not in
     // catalog" findings and retry without losing scroll/context.
     const accepted = await ObjectCodeGenerator.showDiffPreview(
-      obj, first.code, stateManager, first.report,
+      obj, first.code, stateManager, first.report, first.review, first.autoFix,
       async (acks: string[]) => {
         return ObjectCodeGenerator.generateOnce(
           obj, tdsDoc, index, proxyPort, totalObjects, acks
@@ -127,7 +137,7 @@ export class ObjectCodeGenerator {
     proxyPort: number,
     totalObjects: number,
     acknowledgements: readonly string[]
-  ): Promise<{ code: string; report?: CleanCoreReport }> {
+  ): Promise<{ code: string; report?: CleanCoreReport; review?: ReviewReport; autoFix?: AutoFixSummary }> {
 
     const ackSuffix = acknowledgements.length > 0
       ? ` (regen with ${acknowledgements.length} ack)`
@@ -178,15 +188,49 @@ export class ObjectCodeGenerator {
       .replace(/```/g, '')
       .trim();
 
-    // Post-generation Clean Core verification. Acknowledged refs are excluded
-    // from the verdict so a fully-acknowledged report passes.
+    // Post-generation in parallel:
+    //   - CleanCoreVerifier  (deterministic regex + MCP catalog lookup)
+    //   - ReviewAgent        (LLM critic; catches judgment-call issues)
+    // Acknowledged refs are excluded from the Clean Core verdict so a
+    // fully-acknowledged report passes. Both reports surface in the preview;
+    // only Clean Core verdict=fail blocks Accept.
+    const [reportRes, reviewRes] = await Promise.allSettled([
+      verifyGeneratedCode(generatedCode, resolveMcpPort(), acknowledgements),
+      reviewGeneratedCode(obj, generatedCode, proxyPort)
+    ]);
+
     let report: CleanCoreReport | undefined;
-    try {
-      report = await verifyGeneratedCode(generatedCode, resolveMcpPort(), acknowledgements);
-    } catch (err: any) {
-      console.error('DarkHorse: CleanCoreVerifier threw:', err?.message ?? err);
+    if (reportRes.status === 'fulfilled') {
+      report = reportRes.value;
+    } else {
+      console.error('DarkHorse: CleanCoreVerifier threw:', reportRes.reason?.message ?? reportRes.reason);
     }
-    return { code: generatedCode, report };
+
+    let review: ReviewReport | undefined;
+    if (reviewRes.status === 'fulfilled') {
+      review = reviewRes.value;
+    } else {
+      console.error('DarkHorse: ReviewAgent threw:', reviewRes.reason?.message ?? reviewRes.reason);
+    }
+
+    // Sprint 6 — deterministic auto-fix for direct SAP-table SELECTs when MCP
+    // knows the released CDS replacement. Catches the case where the LLM had
+    // grounding for VBAK -> I_SalesDocument but still emitted FROM vbak.
+    // After rewriting we re-run the verifier (and review) so the panel reflects
+    // the corrected state.
+    const autoFix = applyCdsAutoFix(generatedCode, report);
+    if (autoFix.summary.fixes.length > 0) {
+      generatedCode = autoFix.fixedCode;
+
+      const [reportRes2, reviewRes2] = await Promise.allSettled([
+        verifyGeneratedCode(generatedCode, resolveMcpPort(), acknowledgements),
+        reviewGeneratedCode(obj, generatedCode, proxyPort)
+      ]);
+      if (reportRes2.status === 'fulfilled') report = reportRes2.value;
+      if (reviewRes2.status === 'fulfilled') review = reviewRes2.value;
+    }
+
+    return { code: generatedCode, report, review, autoFix: autoFix.summary };
   }
 
   /**
@@ -198,7 +242,9 @@ export class ObjectCodeGenerator {
     initialCode: string,
     stateManager: PipelineStateManager,
     initialReport: CleanCoreReport | undefined,
-    regenerator: (acknowledgements: string[]) => Promise<{ code: string; report?: CleanCoreReport }>
+    initialReview: ReviewReport | undefined,
+    initialAutoFix: AutoFixSummary | undefined,
+    regenerator: (acknowledgements: string[]) => Promise<{ code: string; report?: CleanCoreReport; review?: ReviewReport; autoFix?: AutoFixSummary }>
   ): Promise<boolean> {
 
     return new Promise(async (resolve) => {
@@ -210,13 +256,15 @@ export class ObjectCodeGenerator {
       );
 
       // Mutable state — the regenerate handler swaps these in place.
-      let currentCode   = initialCode;
-      let currentReport = initialReport;
+      let currentCode    = initialCode;
+      let currentReport  = initialReport;
+      let currentReview  = initialReview;
+      let currentAutoFix = initialAutoFix;
       // Sticky set of acknowledgements across regenerations within this preview.
-      const stickyAcks  = new Set<string>();
+      const stickyAcks   = new Set<string>();
 
       panel.webview.html = ObjectCodeGenerator.getPreviewHtml(
-        obj, currentCode, currentReport
+        obj, currentCode, currentReport, currentReview, currentAutoFix
       );
 
       let resolved = false;
@@ -237,6 +285,9 @@ export class ObjectCodeGenerator {
             if (objIndex >= 0) {
               currentState.abapObjects[objIndex].codeGenerated = true;
               currentState.abapObjects[objIndex].codeAccepted = true;
+              // CPI-6 Sprint 6 — store the AI-generated code on the state so
+              // the Correction Store can diff later developer edits against it.
+              currentState.abapObjects[objIndex].generatedCode = currentCode;
               currentState.currentObjectIndex = objIndex + 1;
               if (currentState.currentObjectIndex >= currentState.abapObjects.length) {
                 currentState.currentStage = 'complete';
@@ -316,10 +367,12 @@ export class ObjectCodeGenerator {
           try {
             const result = await regenerator(Array.from(stickyAcks));
             if (result.code) {
-              currentCode   = result.code;
-              currentReport = result.report;
+              currentCode    = result.code;
+              currentReport  = result.report;
+              currentReview  = result.review;
+              currentAutoFix = result.autoFix;
               panel.webview.html = ObjectCodeGenerator.getPreviewHtml(
-                obj, currentCode, currentReport
+                obj, currentCode, currentReport, currentReview, currentAutoFix
               );
             } else {
               vscode.window.showErrorMessage(
@@ -641,16 +694,94 @@ Start with REPORT, CLASS ... DEFINITION, INTERFACE, or whatever object type the 
   </div>`;
   }
 
+  private static renderReviewReport(report?: ReviewReport): string {
+    if (!report || report.unavailable) {
+      return '';
+    }
+    const sevLabel: Record<ReviewSeverity, string> = {
+      critical: 'CRITICAL', major: 'MAJOR', minor: 'MINOR', info: 'INFO'
+    };
+    const sevClass: Record<ReviewSeverity, string> = {
+      critical: 'rv-sev-critical', major: 'rv-sev-major',
+      minor: 'rv-sev-minor', info: 'rv-sev-info'
+    };
+    const c = report.counts;
+    const hasFindings = report.findings.length > 0;
+
+    const findingsHtml = hasFindings
+      ? `<table class="rv-table">
+           <thead>
+             <tr>
+               <th>Severity</th><th>Category</th><th>Location</th>
+               <th>Description</th><th>Suggestion</th>
+             </tr>
+           </thead>
+           <tbody>
+             ${report.findings.map(f => `<tr>
+               <td><span class="rv-sev ${sevClass[f.severity]}">${sevLabel[f.severity]}</span></td>
+               <td>${ObjectCodeGenerator.escapeHtml(f.category)}</td>
+               <td class="rv-mono">${ObjectCodeGenerator.escapeHtml(f.location || '—')}</td>
+               <td>${ObjectCodeGenerator.escapeHtml(f.description)}</td>
+               <td>${ObjectCodeGenerator.escapeHtml(f.suggestion || '—')}</td>
+             </tr>`).join('')}
+           </tbody>
+         </table>`
+      : `<div class="rv-empty">No findings.</div>`;
+
+    const verdictClass = c.critical > 0 ? 'rv-fail'
+                        : c.major   > 0 ? 'rv-warn'
+                        : 'rv-pass';
+
+    return `
+  <div class="rv-report ${verdictClass}">
+    <div class="rv-header">
+      <span class="rv-badge">REVIEW AGENT — CPI-6</span>
+      <span class="rv-summary">${ObjectCodeGenerator.escapeHtml(report.summary)}</span>
+      <span class="rv-counts">
+        <span class="rv-sev rv-sev-critical">Critical: ${c.critical}</span>
+        <span class="rv-sev rv-sev-major">Major: ${c.major}</span>
+        <span class="rv-sev rv-sev-minor">Minor: ${c.minor}</span>
+        <span class="rv-sev rv-sev-info">Info: ${c.info}</span>
+      </span>
+    </div>
+    ${findingsHtml}
+  </div>`;
+  }
+
+  private static renderAutoFixBanner(autoFix?: AutoFixSummary): string {
+    if (!autoFix || autoFix.fixes.length === 0) return '';
+    const rows = autoFix.fixes.map(f =>
+      `<li><span class="af-mono">FROM ${ObjectCodeGenerator.escapeHtml(f.table)}</span> ` +
+      `&rarr; <span class="af-mono">FROM ${ObjectCodeGenerator.escapeHtml(f.cdsView)}</span> ` +
+      `(${f.occurrences} occurrence${f.occurrences === 1 ? '' : 's'})</li>`
+    ).join('');
+    return `
+  <div class="af-banner">
+    <div class="af-title">ℹ️ Auto-fix applied — direct SAP-table SELECTs rewritten to released CDS views</div>
+    <ul class="af-list">${rows}</ul>
+    <div class="af-caveat">
+      The FROM clause was rewritten deterministically. CDS field names may differ
+      from the original table fields (e.g. <span class="af-mono">vbak-vbeln</span>
+      &rarr; <span class="af-mono">salesorder</span>). Review SELECT field lists
+      and any <span class="af-mono">~</span> alias references before accepting.
+    </div>
+  </div>`;
+  }
+
   private static getPreviewHtml(
     obj: AbapObject,
     code: string,
-    cleanCoreReport?: CleanCoreReport
+    cleanCoreReport?: CleanCoreReport,
+    reviewReport?: ReviewReport,
+    autoFix?: AutoFixSummary
   ): string {
     const escapedCode = ObjectCodeGenerator.escapeHtml(code);
 
     const lineCount = code.split('\n').length;
 
+    const autoFixHtml   = ObjectCodeGenerator.renderAutoFixBanner(autoFix);
     const cleanCoreHtml = ObjectCodeGenerator.renderCleanCoreReport(cleanCoreReport);
+    const reviewHtml    = ObjectCodeGenerator.renderReviewReport(reviewReport);
 
     // CPI-6 hard gate: a Level D finding blocks Accept. The developer must
     // either acknowledge any "not in catalog" finding they know is real
@@ -853,6 +984,72 @@ Start with REPORT, CLASS ... DEFINITION, INTERFACE, or whatever object type the 
     }
     .cc-regen-btn:hover:not(:disabled) { background: #388bfd; }
     .cc-regen-btn:disabled { background: #30363d; color: #6e7681; cursor: not-allowed; }
+    /* Review Agent panel (CPI-6 Sprint 6) */
+    .rv-report {
+      margin: 0 24px 16px;
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 12px;
+      border: 1px solid #30363d;
+      background: #161b22;
+    }
+    .rv-report.rv-pass { border-color: #238636; }
+    .rv-report.rv-warn { border-color: #d29922; }
+    .rv-report.rv-fail { border-color: #da3633; }
+    .rv-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .rv-badge {
+      background: #6e7681;
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .rv-summary { color: #e6edf3; font-weight: 500; flex: 1; min-width: 200px; }
+    .rv-counts { display: flex; gap: 6px; }
+    .rv-sev {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-weight: 700;
+      color: #fff;
+      font-size: 11px;
+    }
+    .rv-sev-critical { background: #da3633; }
+    .rv-sev-major    { background: #d29922; color: #0d1117; }
+    .rv-sev-minor    { background: #1f6feb; }
+    .rv-sev-info     { background: #6e7681; }
+    .rv-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12px; }
+    .rv-table th, .rv-table td {
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid #30363d;
+      vertical-align: top;
+    }
+    .rv-table th { color: #8b949e; font-weight: 600; }
+    .rv-mono { font-family: 'Consolas', 'Courier New', monospace; color: #79c0ff; }
+    .rv-empty { color: #8b949e; padding: 4px 0; }
+    /* Auto-fix banner */
+    .af-banner {
+      margin: 0 24px 16px;
+      padding: 12px 16px;
+      background: #0d2942;
+      border: 1px solid #1f6feb;
+      border-radius: 8px;
+      font-size: 12px;
+      color: #c9d1d9;
+    }
+    .af-title { font-weight: 700; color: #79c0ff; margin-bottom: 6px; }
+    .af-list  { margin: 4px 0 8px 24px; padding: 0; }
+    .af-list li { margin-bottom: 2px; }
+    .af-mono  { font-family: 'Consolas', 'Courier New', monospace; color: #79c0ff; }
+    .af-caveat { color: #8b949e; line-height: 1.5; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -879,9 +1076,13 @@ Start with REPORT, CLASS ... DEFINITION, INTERFACE, or whatever object type the 
     The code has NOT been automatically saved to SAP.
   </div>
 
+  ${autoFixHtml}
+
   ${failBannerHtml}
 
   ${cleanCoreHtml}
+
+  ${reviewHtml}
 
   <div class="code-container">
     <pre>${escapedCode}</pre>
