@@ -51,7 +51,7 @@ export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D';
 export type Verdict        = 'pass' | 'warn' | 'fail' | 'skipped';
 
 export interface CleanCoreFinding {
-  category:     'exit' | 'table' | 'bapi' | 'ui';
+  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth';
   reference:    string;          // raw token found in the source
   exists:       boolean | null;  // null if the tool doesn't return existence
   level:        CleanCoreLevel | null;
@@ -80,6 +80,13 @@ export interface CleanCoreReport {
 
 const RX_USEREXIT = /\bUSEREXIT_[A-Z0-9_]+\b/gi;
 const RX_BAPI     = /CALL\s+FUNCTION\s+['"]\s*(BAPI_[A-Z0-9_]+)\s*['"]/gi;
+
+// CPI-6 A3 — AUTHORITY-CHECK OBJECT '<obj>' calls. Captures the auth object
+// name (a 1-10 char SAP identifier such as S_TCODE, S_DEVELOP, F_BKPF_GSB).
+// Classic AUTHORITY-CHECK is Level B in Clean Core: still permitted, but for
+// CDS-bearing entities the recommended path is a DCL role with `aspect
+// pfcg_auth` mapping to the same PFCG object.
+const RX_AUTHORITY_CHECK = /\bAUTHORITY-CHECK\s+OBJECT\s+['"]\s*([A-Z][A-Z0-9_]{1,9})\s*['"]/gi;
 
 // Classic UI / form patterns — flagged Level B with a Fiori / Adobe Forms
 // alternative. These are not blockers (Level D blocks Accept), just advisory
@@ -199,21 +206,34 @@ interface ExtractedReferences {
    *  the corresponding ZC_<stem>. CPI-6 A2. */
   interfaceAnn: Map<string, number>;
   interfaceStem: string | null;
+  /** AUTHORITY-CHECK references grouped by PFCG auth object name. CPI-6 A3. */
+  authChecks: Map<string, number>;
+  /** True when the generated code is a behavior-projection class (ZBP_I_*).
+   *  Behavior impls should rely on DCL roles attached to the entity, not on
+   *  classic AUTHORITY-CHECK, so the finding is escalated in that context. */
+  isBehaviorImpl: boolean;
 }
 
 function tally(map: Map<string, number>, key: string): void {
   map.set(key, (map.get(key) ?? 0) + 1);
 }
 
+// Recognises ABAP class declarations for behavior-projection classes
+// (ZBP_I_<stem> DEFINITION) so the A3 finding can escalate when the auth
+// check sits inside what should be DCL-protected code.
+const RX_BEHAVIOR_IMPL = /\bCLASS\s+ZBP_I_[A-Z][A-Z0-9_]*\s+(?:DEFINITION|IMPLEMENTATION)\b/i;
+
 function extractReferences(code: string): ExtractedReferences {
   const out: ExtractedReferences = {
-    exits:         new Map<string, number>(),
-    tables:        new Map<string, number>(),
-    bapis:         new Map<string, number>(),
-    uis:           new Map<string, number>(),
-    exposeZi:      new Map<string, number>(),
-    interfaceAnn:  new Map<string, number>(),
-    interfaceStem: null
+    exits:          new Map<string, number>(),
+    tables:         new Map<string, number>(),
+    bapis:          new Map<string, number>(),
+    uis:            new Map<string, number>(),
+    exposeZi:       new Map<string, number>(),
+    interfaceAnn:   new Map<string, number>(),
+    interfaceStem:  null,
+    authChecks:     new Map<string, number>(),
+    isBehaviorImpl: RX_BEHAVIOR_IMPL.test(code)
   };
 
   for (const m of code.matchAll(RX_USEREXIT)) {
@@ -222,6 +242,10 @@ function extractReferences(code: string): ExtractedReferences {
 
   for (const m of code.matchAll(RX_BAPI)) {
     tally(out.bapis, (m[1] ?? '').toUpperCase());
+  }
+
+  for (const m of code.matchAll(RX_AUTHORITY_CHECK)) {
+    tally(out.authChecks, (m[1] ?? '').toUpperCase());
   }
 
   // FROM-clause table extraction: skip anything that isn't a known SAP
@@ -409,7 +433,8 @@ export async function verifyGeneratedCode(
     refs.bapis.size === 0 &&
     refs.uis.size === 0 &&
     refs.exposeZi.size === 0 &&
-    refs.interfaceAnn.size === 0;
+    refs.interfaceAnn.size === 0 &&
+    refs.authChecks.size === 0;
 
   if (nothingFound) {
     return {
@@ -431,7 +456,7 @@ export async function verifyGeneratedCode(
     return {
       verdict:        'skipped',
       scannedAt,
-      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size,
+      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size,
       countsByLevel:  emptyCounts(),
       findings:       [],
       mcpUnavailable: true,
@@ -581,6 +606,35 @@ export async function verifyGeneratedCode(
       alternative:  `expose ${zc} (consumption view) instead of ${zi}`,
       occurrences:  count,
       acknowledged: ackFor(zi)
+    });
+  }
+
+  // ---- CPI-6 A3: AUTHORITY-CHECK references --------------------------------
+  // Classic AUTHORITY-CHECK is Level B — still permitted. For behavior
+  // projection classes (ZBP_I_*) the recommended path is a DCL role attached
+  // to the interface view with `aspect pfcg_auth` mapping to the same PFCG
+  // object, so we tag those findings with sharper alternative text.
+  for (const [authObj, count] of refs.authChecks.entries()) {
+    const inBehaviorImpl = refs.isBehaviorImpl;
+    const description = inBehaviorImpl
+      ? `AUTHORITY-CHECK OBJECT '${authObj}' inside a behavior-projection class. ` +
+        `For RAP-managed entities the projection layer should rely on DCL role ` +
+        `enforcement on the underlying CDS view; classic AUTHORITY-CHECK in ZBP_I_* ` +
+        `bypasses the DCL contract.`
+      : `AUTHORITY-CHECK OBJECT '${authObj}'. Permitted in classic programs, but ` +
+        `if this object protects a CDS-exposed entity the recommended path is a ` +
+        `DCL role with aspect pfcg_auth mapping to PFCG object '${authObj}'.`;
+    findings.push({
+      category:     'auth',
+      reference:    `AUTHORITY-CHECK ${authObj}`,
+      exists:       true,
+      level:        'B',
+      description,
+      alternative:
+        `define role ZI_<Entity> { grant select on ZI_<Entity> where ... ; ` +
+        `aspect pfcg_auth '${authObj}' ... ; }`,
+      occurrences:  count,
+      acknowledged: ackFor(`AUTHORITY-CHECK ${authObj}`)
     });
   }
 

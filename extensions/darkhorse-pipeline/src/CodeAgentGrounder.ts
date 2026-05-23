@@ -283,7 +283,10 @@ function detectLayerRoleGrounding(obj: AbapObject): GroundingItem | null {
         `key logic explicitly calls for. Read-only entities omit this.\n` +
         `  - Persistent table reference uses the underlying Z table when one ` +
         `exists in this deliverable; otherwise the LLM must NOT invent a ` +
-        `persistent-table name.`
+        `persistent-table name.\n` +
+        `  - Authorization: declare authorization master ( instance ) on the ` +
+        `entity. Do NOT inline AUTHORITY-CHECK in the BDEF — that lives in ` +
+        `the DCL role for ${name} and (for behaviors) in the projection class.`
     };
   }
 
@@ -298,7 +301,39 @@ function detectLayerRoleGrounding(obj: AbapObject): GroundingItem | null {
         `  - CLASS ${name} DEFINITION PUBLIC ABSTRACT FINAL FOR BEHAVIOR OF ZI_${stem}.\n` +
         `  - Implement only determinations, validations, and actions the ` +
         `BDEF declares. Do not invent behaviors not in the BDEF.\n` +
-        `  - Use EML (MODIFY ENTITIES OF ${name}) for any side-effect writes.`
+        `  - Use EML (MODIFY ENTITIES OF ${name}) for any side-effect writes.\n` +
+        `  - Authorization: rely on the DCL role attached to ZI_${stem}. Do ` +
+        `NOT emit classic AUTHORITY-CHECK statements here — they bypass the ` +
+        `DCL contract and the post-generation Clean Core verifier will flag ` +
+        `them as a layering violation.`
+    };
+  }
+
+  if (type === 'DCLS' && /^ZI_[A-Z][A-Z0-9_]*$/.test(name)) {
+    const stem = name.replace(/^ZI_/, '');
+    return {
+      heading: 'Clean Core layer role: Data Control Language Role (DCLS)',
+      tool:    'layer_role',
+      body:
+        `You are generating the DCL access role ${name} that protects the ` +
+        `interface view ZI_${stem}. STRICT rules:\n\n` +
+        `  - Skeleton:\n` +
+        `      @MappingRole: true\n` +
+        `      define role ${name} {\n` +
+        `        grant select on ZI_${stem}\n` +
+        `          where (<filter expression bound to the entity's key>)\n` +
+        `          = aspect pfcg_auth ( <PFCG_OBJECT>,\n` +
+        `              <PFCG_FIELD_1> = <field_1>,\n` +
+        `              ACTVT = '03' );\n` +
+        `      }\n\n` +
+        `  - The role name MUST match the protected interface view name ` +
+        `(${name} protects ZI_${stem}) — this is the SAP convention DCL ` +
+        `inference relies on.\n` +
+        `  - Use aspect pfcg_auth to bind PFCG authorization objects. Do not ` +
+        `attempt to express auth via raw WHERE clauses unless the rule has ` +
+        `no PFCG equivalent.\n` +
+        `  - Read-only access uses ACTVT = '03'. Map other write activities ` +
+        `from the BDEF allowed-actions list.`
     };
   }
 

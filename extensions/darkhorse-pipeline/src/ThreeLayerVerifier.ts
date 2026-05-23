@@ -36,7 +36,8 @@ export type LayerRole =
   | 'behaviorProj'      // ZBP_I_*
   | 'behaviorDef'       // BDEF for ZI_*
   | 'serviceDef'        // ZUI_*
-  | 'serviceBinding';   // ZUI_*_O4
+  | 'serviceBinding'    // ZUI_*_O4
+  | 'dcl';              // DCLS access role for ZI_<stem>  (CPI-6 A3)
 
 export interface MissingLayer {
   role:           LayerRole;
@@ -87,15 +88,26 @@ const RX_SERVICE_DEF = /^ZUI_([A-Z][A-Z0-9_]*)$/i;
 /** Matches a service binding, e.g. ZUI_OTC_ROUTING_DETAIL_O4. */
 const RX_SERVICE_BIND = /^ZUI_([A-Z][A-Z0-9_]*)_O4$/i;
 
-function extractEntity(name: string): { role: LayerRole | null; entity: string | null } {
+function extractEntity(
+  name: string,
+  objectType: string
+): { role: LayerRole | null; entity: string | null } {
   const trimmed = name.trim().toUpperCase();
+  const type    = (objectType ?? '').trim().toUpperCase();
   // Order matters: SRVB (_O4 suffix) must be tested before SRVD because every
   // SRVB also matches the SRVD pattern.
   let m: RegExpExecArray | null;
   if ((m = RX_SERVICE_BIND.exec(trimmed))) return { role: 'serviceBinding', entity: m[1]! };
   if ((m = RX_SERVICE_DEF.exec(trimmed)))  return { role: 'serviceDef',     entity: m[1]! };
   if ((m = RX_BEHAVIOR_P.exec(trimmed)))   return { role: 'behaviorProj',   entity: m[1]! };
-  if ((m = RX_INTERFACE.exec(trimmed)))    return { role: 'interface',      entity: m[1]! };
+  // DCL roles conventionally share the name of the interface view they
+  // protect (define role ZI_<stem>). Disambiguate using the object type
+  // BEFORE the bare interface-pattern check, otherwise every DCLS would be
+  // mis-classified as an interface view.
+  if ((m = RX_INTERFACE.exec(trimmed))) {
+    if (type === 'DCLS') return { role: 'dcl',       entity: m[1]! };
+    return                     { role: 'interface', entity: m[1]! };
+  }
   if ((m = RX_CONSUMPTION.exec(trimmed)))  return { role: 'consumption',    entity: m[1]! };
   return { role: null, entity: null };
 }
@@ -198,6 +210,17 @@ function makeMissing(
           'v4 endpoint that Fiori Elements and external consumers can call.',
         blocking: false
       };
+    case 'dcl':
+      return {
+        role, objectType: 'DCLS',
+        suggestedName: `ZI_${entity}`,
+        rationale:
+          'Data Control Language (DCL) role enforces authorization on the ' +
+          'interface view ZI_<entity>. Any CDS view exposed via SRVD must be ' +
+          'protected by a matching DCL role; without it the service leaks data. ' +
+          'The DCL role name conventionally matches the interface view name.',
+        blocking: false
+      };
   }
 }
 
@@ -216,7 +239,7 @@ export function verifyThreeLayer(objects: ReadonlyArray<AbapObject>): ThreeLayer
   const all = objects as AbapObject[];
 
   for (const obj of all) {
-    const { role, entity } = extractEntity(obj.objectName ?? '');
+    const { role, entity } = extractEntity(obj.objectName ?? '', obj.objectType ?? '');
     if (!role || !entity) continue;
 
     let c = clusters.get(entity);
@@ -258,7 +281,7 @@ export function verifyThreeLayer(objects: ReadonlyArray<AbapObject>): ThreeLayer
       Boolean(c.present.serviceBinding);
     if (!isServiceBearing) continue;
 
-    const required: LayerRole[] = ['interface', 'consumption', 'serviceDef', 'serviceBinding'];
+    const required: LayerRole[] = ['interface', 'consumption', 'serviceDef', 'serviceBinding', 'dcl'];
     if (c.transactional) {
       required.push('behaviorDef', 'behaviorProj');
     }
