@@ -51,7 +51,7 @@ export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D';
 export type Verdict        = 'pass' | 'warn' | 'fail' | 'skipped';
 
 export interface CleanCoreFinding {
-  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth';
+  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf';
   reference:    string;          // raw token found in the source
   exists:       boolean | null;  // null if the tool doesn't return existence
   level:        CleanCoreLevel | null;
@@ -87,6 +87,18 @@ const RX_BAPI     = /CALL\s+FUNCTION\s+['"]\s*(BAPI_[A-Z0-9_]+)\s*['"]/gi;
 // CDS-bearing entities the recommended path is a DCL role with `aspect
 // pfcg_auth` mapping to the same PFCG object.
 const RX_AUTHORITY_CHECK = /\bAUTHORITY-CHECK\s+OBJECT\s+['"]\s*([A-Z][A-Z0-9_]{1,9})\s*['"]/gi;
+
+// CPI-6 A4 — open-cursor SELECT loops. Any `ENDSELECT` keyword presupposes a
+// loop-style SELECT (SELECT ... ENDSELECT processes rows one-at-a-time
+// instead of pulling them in a single round trip). Push-down replacement is
+// SELECT ... INTO TABLE.
+const RX_ENDSELECT = /\bENDSELECT\b/gi;
+
+// SELECT * — pulls every column from the wide row. Push-down advice is to
+// project only the columns the program actually consumes. We tolerate
+// SELECT * FROM <internal-table-or-itab-var> by requiring "FROM <SAP-style
+// upper identifier>" so SELECT * FROM lt_data doesn't false-positive.
+const RX_SELECT_STAR = /\bSELECT\s+\*\s+FROM\s+[A-Z][A-Z0-9_]+/gi;
 
 // Classic UI / form patterns — flagged Level B with a Fiori / Adobe Forms
 // alternative. These are not blockers (Level D blocks Accept), just advisory
@@ -194,6 +206,12 @@ const FORBIDDEN_INTERFACE_ANNOTATIONS: Array<{
 // first whitespace or `:` so we can classify it deterministically).
 const RX_ANY_ANNOTATION = /@[A-Za-z][A-Za-z0-9_.]*/g;
 
+/** CPI-6 A4 perf-finding identifiers. */
+type PerfFindingKey =
+  | 'OPEN_CURSOR'         // SELECT ... ENDSELECT
+  | 'SELECT_STAR'         // SELECT * FROM <table>
+  | 'NESTED_SELECT_LOOP'; // SELECT inside a LOOP AT block
+
 interface ExtractedReferences {
   exits:    Map<string, number>;
   tables:   Map<string, number>;
@@ -212,6 +230,9 @@ interface ExtractedReferences {
    *  Behavior impls should rely on DCL roles attached to the entity, not on
    *  classic AUTHORITY-CHECK, so the finding is escalated in that context. */
   isBehaviorImpl: boolean;
+  /** CPI-6 A4 HANA push-down findings. Key is a stable identifier; value is
+   *  the occurrence count in the scanned code. */
+  perf: Map<PerfFindingKey, number>;
 }
 
 function tally(map: Map<string, number>, key: string): void {
@@ -233,7 +254,8 @@ function extractReferences(code: string): ExtractedReferences {
     interfaceAnn:   new Map<string, number>(),
     interfaceStem:  null,
     authChecks:     new Map<string, number>(),
-    isBehaviorImpl: RX_BEHAVIOR_IMPL.test(code)
+    isBehaviorImpl: RX_BEHAVIOR_IMPL.test(code),
+    perf:           new Map<PerfFindingKey, number>()
   };
 
   for (const m of code.matchAll(RX_USEREXIT)) {
@@ -247,6 +269,37 @@ function extractReferences(code: string): ExtractedReferences {
   for (const m of code.matchAll(RX_AUTHORITY_CHECK)) {
     tally(out.authChecks, (m[1] ?? '').toUpperCase());
   }
+
+  // CPI-6 A4 — open-cursor + SELECT * are direct regex counts.
+  const endselectCount = (code.match(RX_ENDSELECT) ?? []).length;
+  if (endselectCount > 0) out.perf.set('OPEN_CURSOR', endselectCount);
+
+  const selectStarCount = (code.match(RX_SELECT_STAR) ?? []).length;
+  if (selectStarCount > 0) out.perf.set('SELECT_STAR', selectStarCount);
+
+  // Nested-SELECT-inside-LOOP: scan line by line, maintain a loop-depth
+  // counter, count any SELECT that occurs while depth > 0. Comments stripped
+  // first so commented-out blocks don't false-positive.
+  const lines = code.split('\n').map(line => {
+    if (/^\s*\*/.test(line)) return '';
+    const quoteIdx = line.indexOf('"');
+    return quoteIdx >= 0 ? line.slice(0, quoteIdx) : line;
+  });
+  let loopDepth = 0;
+  let nestedCount = 0;
+  for (const ln of lines) {
+    const upper = ln.toUpperCase();
+    if (/\bLOOP\s+AT\b/.test(upper)) loopDepth += 1;
+    if (/\bENDLOOP\b/.test(upper))   loopDepth = Math.max(0, loopDepth - 1);
+    if (loopDepth > 0 && /\bSELECT\b/.test(upper)) {
+      // ignore SELECT-OPTIONS declarations and SELECTION-SCREEN tokens —
+      // those aren't database reads
+      if (!/\bSELECT-OPTIONS\b/.test(upper) && !/\bSELECTION[-_]SCREEN\b/.test(upper)) {
+        nestedCount += 1;
+      }
+    }
+  }
+  if (nestedCount > 0) out.perf.set('NESTED_SELECT_LOOP', nestedCount);
 
   // FROM-clause table extraction: skip anything that isn't a known SAP
   // standard table to avoid false positives on custom Z*/Y* tables and
@@ -434,7 +487,8 @@ export async function verifyGeneratedCode(
     refs.uis.size === 0 &&
     refs.exposeZi.size === 0 &&
     refs.interfaceAnn.size === 0 &&
-    refs.authChecks.size === 0;
+    refs.authChecks.size === 0 &&
+    refs.perf.size === 0;
 
   if (nothingFound) {
     return {
@@ -456,7 +510,7 @@ export async function verifyGeneratedCode(
     return {
       verdict:        'skipped',
       scannedAt,
-      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size,
+      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size + refs.perf.size,
       countsByLevel:  emptyCounts(),
       findings:       [],
       mcpUnavailable: true,
@@ -635,6 +689,41 @@ export async function verifyGeneratedCode(
         `aspect pfcg_auth '${authObj}' ... ; }`,
       occurrences:  count,
       acknowledged: ackFor(`AUTHORITY-CHECK ${authObj}`)
+    });
+  }
+
+  // ---- CPI-6 A4: HANA push-down --------------------------------------------
+  // Each perf finding is Level B. The categories are distinct enough that
+  // separate findings (rather than one composite) give the developer a clear
+  // signal for each antipattern.
+  const perfDetails: Record<PerfFindingKey, { reference: string; description: string; alternative: string }> = {
+    OPEN_CURSOR: {
+      reference:   'SELECT ... ENDSELECT (open cursor)',
+      description: 'Row-by-row SELECT/ENDSELECT keeps a database cursor open and prevents HANA from streaming or parallelising the read. The database does work per iteration that a single SELECT INTO TABLE would do once.',
+      alternative: 'SELECT <fields> FROM <source> INTO TABLE @DATA(lt_data) [FOR ALL ENTRIES OF @lt_keys] WHERE ... — then process the internal table in ABAP.'
+    },
+    SELECT_STAR: {
+      reference:   'SELECT *',
+      description: 'SELECT * pulls every column from the source, even columns the program never reads. On wide HANA tables and CDS views this materially hurts read throughput and inflates memory.',
+      alternative: 'SELECT <only-the-fields-you-consume> FROM <source> ... — explicit field lists are also a prerequisite for HANA column-store pruning.'
+    },
+    NESTED_SELECT_LOOP: {
+      reference:   'SELECT inside LOOP (N+1)',
+      description: 'A SELECT inside a LOOP issues one DB roundtrip per row of the outer loop (the classic N+1 antipattern). HANA-side joins and FOR ALL ENTRIES OF do the same work in a single batched read.',
+      alternative: 'Use a CDS association traversal, a JOIN inside the outer SELECT, or SELECT ... FOR ALL ENTRIES OF @<outer_table> to batch the reads.'
+    }
+  };
+  for (const [key, count] of refs.perf.entries()) {
+    const d = perfDetails[key];
+    findings.push({
+      category:     'perf',
+      reference:    d.reference,
+      exists:       true,
+      level:        'B',
+      description:  d.description,
+      alternative:  d.alternative,
+      occurrences:  count,
+      acknowledged: ackFor(d.reference)
     });
   }
 

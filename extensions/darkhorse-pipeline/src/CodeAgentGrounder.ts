@@ -47,7 +47,7 @@ export interface GroundingItem {
   /** Free-form heading shown in the system prompt block. */
   heading:  string;
   /** Tool that produced this item. */
-  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern' | 'sibling_wrapper' | 'layer_role';
+  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern' | 'sibling_wrapper' | 'layer_role' | 'hana_pushdown';
   /** Pre-rendered markdown-ish text to inject into the prompt. */
   body:     string;
 }
@@ -182,6 +182,70 @@ async function isMcpUp(port: number): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// HANA push-down grounding — CPI-6 A4
+// ---------------------------------------------------------------------------
+
+/**
+ * Emit a HANA push-down rule block tuned to the object type. Deterministic
+ * — no MCP, no retrieval — so it ships regardless of MCP availability.
+ *
+ *   - DDLS: CDS push-down patterns (associations over joins, aggregation in
+ *     CDS, $projection, performance-relevant annotations).
+ *   - PROG / CLAS / FUNC: forbid ENDSELECT loops, SELECT *, nested SELECT
+ *     in LOOP. Steer toward SELECT INTO TABLE + FOR ALL ENTRIES OF or CDS
+ *     association traversal.
+ *
+ * Returns null when the object type is not one of the above (e.g. SRVB,
+ * DCLS, BDEF) — those have their own layer-role rules already.
+ */
+function detectHanaPushdownGrounding(obj: AbapObject): GroundingItem | null {
+  const type = (obj.objectType ?? '').trim().toUpperCase();
+  if (type === 'DDLS') {
+    return {
+      heading: 'HANA push-down (CDS)',
+      tool:    'hana_pushdown',
+      body:
+        `This CDS view will run on HANA. Apply these push-down rules:\n\n` +
+        `  - Prefer ASSOCIATIONS over JOIN for navigation. Define ` +
+        `\`association [0..*] to <Target> as _<role> on $projection.<key> = _<role>.<key>\` ` +
+        `and let consumers traverse \`_<role>.<field>\`. HANA prunes ` +
+        `un-traversed associations at runtime; static joins do not prune.\n` +
+        `  - Aggregate in CDS, not in ABAP. Use \`@DefaultAggregation: #SUM\` ` +
+        `(or #MIN / #MAX / #AVG / #COUNT) on the measure fields. The ` +
+        `aggregation runs in the HANA engine; ABAP-side SUMs round-trip ` +
+        `every row.\n` +
+        `  - Project explicitly with \`$projection.<field>\` rather than ` +
+        `re-selecting from the source. This keeps the optimiser informed ` +
+        `about which fields are actually consumed.\n` +
+        `  - Avoid CASE expressions that block column pruning. When a ` +
+        `derived column has a single source field, expose it directly.`
+    };
+  }
+  if (type === 'PROG' || type === 'CLAS' || type === 'FUNC') {
+    return {
+      heading: 'HANA push-down (ABAP)',
+      tool:    'hana_pushdown',
+      body:
+        `Apply these HANA push-down rules to all database reads in this object:\n\n` +
+        `  - Do NOT use SELECT ... ENDSELECT. Open-cursor loops issue a ` +
+        `roundtrip per row. Use \`SELECT <fields> FROM <source> INTO TABLE ` +
+        `@DATA(lt_data) WHERE ... .\` and iterate the internal table.\n` +
+        `  - Do NOT use SELECT *. Project only the fields the program ` +
+        `actually consumes. Column-store pruning depends on it.\n` +
+        `  - Do NOT issue a SELECT inside a LOOP. Either:\n` +
+        `      (a) Use a CDS view that joins / associates the entities and ` +
+        `select once from that view; OR\n` +
+        `      (b) Pull the outer set into an internal table, then \`SELECT ` +
+        `<fields> FROM <inner> FOR ALL ENTRIES OF @lt_outer WHERE key = ` +
+        `@lt_outer-key INTO TABLE @DATA(lt_inner).\`\n` +
+        `  - Prefer CDS view consumption (SELECT FROM ZI_/ZC_/I_ views) over ` +
+        `raw table SELECTs — the view encodes the push-down friendly shape.`
+    };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -414,6 +478,13 @@ export async function groundObjectForGeneration(
   const layerItem = detectLayerRoleGrounding(obj);
   if (layerItem) {
     ctx.grounding.push(layerItem);
+  }
+
+  // CPI-6 A4 — HANA push-down grounding. Deterministic, no MCP. Tuned to
+  // object type: CDS views vs ABAP programs/classes/function modules.
+  const pushdownItem = detectHanaPushdownGrounding(obj);
+  if (pushdownItem) {
+    ctx.grounding.push(pushdownItem);
   }
 
   // CPI-6 B4 — sibling wrapper grounding runs deterministically before MCP.
@@ -682,7 +753,7 @@ function inferEntityHint(obj: AbapObject, sapTables: string[]): string {
 export function renderGroundingForPrompt(ctx: GroundingContext): string {
   // Deterministic items (layer_role, sibling_wrapper) ship regardless of MCP
   // availability — they're computed from TDS metadata, not retrieved.
-  const deterministicTools = new Set(['layer_role', 'sibling_wrapper']);
+  const deterministicTools = new Set(['layer_role', 'sibling_wrapper', 'hana_pushdown']);
   const deterministicItems = ctx.grounding.filter(g => deterministicTools.has(g.tool));
   const retrievedItems     = ctx.grounding.filter(g => !deterministicTools.has(g.tool));
 
