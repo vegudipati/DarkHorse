@@ -28,6 +28,7 @@ import { recordGeneration }       from './UidLogger';
 import { applyHeader }            from './HeaderEmitter';
 import { renderStandardsForPrompt } from './StandardsLoader';
 import { generateZWrapper }       from './ZWrapperGenerator';
+import { enforceObjectName }      from './ObjectNameEnforcer';
 import * as crypto                from 'crypto';
 
 export class ObjectCodeGenerator {
@@ -164,7 +165,11 @@ export class ObjectCodeGenerator {
       progress.report({ message: 'Grounding via MCP...' });
       let groundingContext: GroundingContext | undefined;
       try {
-        groundingContext = await groundObjectForGeneration(obj, resolveMcpPort());
+        // CPI-6 B4 — pass the full TDS object list so the grounder can spot
+        // sibling wrapper views (ZI_<TABLE>) and steer the LLM away from
+        // direct SELECT FROM <TABLE>.
+        const siblings = tdsDoc.sections.abapObjectList ?? [];
+        groundingContext = await groundObjectForGeneration(obj, resolveMcpPort(), siblings);
       } catch (err: any) {
         console.error('DarkHorse: CodeAgentGrounder threw:', err?.message ?? err);
       }
@@ -199,6 +204,22 @@ export class ObjectCodeGenerator {
       .replace(/```abap/gi, '')
       .replace(/```/g, '')
       .trim();
+
+    // CPI-6 B3 — enforce the TDS-specified object name. The LLM sometimes
+    // emits an invented declaration name (e.g. "define service RFC_DEST" when
+    // the TDS specified ZUI_OTC_ROUTING_DETAIL). Rewrite the declaration line
+    // so the saved file actually compiles against the TDS object list.
+    const nameEnforcement = enforceObjectName(generatedCode, obj.objectName, obj.objectType);
+    if (nameEnforcement.rewrites.length > 0) {
+      generatedCode = nameEnforcement.code;
+      for (const r of nameEnforcement.rewrites) {
+        console.log(`[DarkHorse] Name enforcement: ${r.where} ${r.from} -> ${r.to}`);
+      }
+      vscode.window.showInformationMessage(
+        `DarkHorse: Corrected ${nameEnforcement.rewrites.length} declaration name(s) in ${obj.objectName} ` +
+        `(LLM emitted ${nameEnforcement.rewrites.map(r => `"${r.from}"`).join(', ')}).`
+      );
+    }
 
     // CPI-6 — emit a 16-hex DarkHorse UID, append the audit log entry to the
     // tamper-evident chain, then prepend the canonical header comment block.

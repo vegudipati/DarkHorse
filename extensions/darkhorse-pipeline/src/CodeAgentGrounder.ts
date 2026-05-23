@@ -47,7 +47,7 @@ export interface GroundingItem {
   /** Free-form heading shown in the system prompt block. */
   heading:  string;
   /** Tool that produced this item. */
-  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern';
+  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern' | 'sibling_wrapper';
   /** Pre-rendered markdown-ish text to inject into the prompt. */
   body:     string;
 }
@@ -185,12 +185,49 @@ async function isMcpUp(port: number): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Sibling wrapper detection — CPI-6 B4
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a map of standard-table -> sibling-wrapper-name for any DDLS sibling
+ * whose name follows the ZI_<TABLE> convention and where <TABLE> matches a
+ * known SAP standard table. The current object is excluded.
+ */
+/** Minimal shape used by the sibling-wrapper detector. Kept structural so the
+ *  caller can pass either AbapObject or the raw TDS `abapObjectList` entry. */
+type SiblingRef = { objectType: string; objectName: string };
+
+function detectSiblingWrappers(
+  current: AbapObject,
+  siblings: ReadonlyArray<SiblingRef>
+): Map<string, SiblingRef> {
+  const map = new Map<string, SiblingRef>();
+  for (const s of siblings) {
+    if (s === current) continue;
+    if (s.objectName === current.objectName) continue;
+    if (s.objectType !== 'DDLS') continue;
+    const m = /^ZI_([A-Z][A-Z0-9_]+)$/.exec(s.objectName.trim().toUpperCase());
+    if (!m) continue;
+    const table = m[1]!;
+    if (SAP_STANDARD_TABLES.has(table)) {
+      map.set(table, s);
+    }
+  }
+  return map;
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
 export async function groundObjectForGeneration(
   obj: AbapObject,
-  mcpPort: number = resolveMcpPort()
+  mcpPort: number = resolveMcpPort(),
+  /** Sibling objects in the same TDS deliverable. When provided, the grounder
+   *  identifies wrapper views (ZI_<TABLE> DDLS) and emits a grounding item
+   *  steering the LLM toward those wrappers instead of direct table access.
+   *  Structurally compatible with AbapObject AND the raw TDS sections entry. */
+  siblings: ReadonlyArray<SiblingRef> = []
 ): Promise<GroundingContext> {
 
   const scannedAt = new Date().toISOString();
@@ -212,6 +249,43 @@ export async function groundObjectForGeneration(
     grounding:       [],
     detected
   };
+
+  // CPI-6 B4 — sibling wrapper grounding runs deterministically before MCP.
+  // It tells the LLM that a Z wrapper view for an SAP standard table is
+  // being generated in this same deliverable, so any read access on that
+  // table inside the current object must go through the sibling wrapper.
+  const wrappers = detectSiblingWrappers(obj, siblings);
+  // A wrapper view is allowed to SELECT FROM its own underlying table, so
+  // when the current object is itself a wrapper view we skip the steering.
+  const isCurrentItselfWrapper =
+    obj.objectType === 'DDLS' &&
+    /^ZI_([A-Z][A-Z0-9_]+)$/.test(obj.objectName.trim().toUpperCase()) &&
+    SAP_STANDARD_TABLES.has(obj.objectName.trim().toUpperCase().replace(/^ZI_/, ''));
+  if (wrappers.size > 0 && !isCurrentItselfWrapper) {
+    const upperCorpus = corpus.toUpperCase();
+    const lines: string[] = [];
+    for (const [table, sib] of wrappers) {
+      const tableMentioned = new RegExp(`\\b${table}\\b`).test(upperCorpus);
+      if (!tableMentioned) continue;
+      lines.push(
+        `  - When reading ${table}, SELECT FROM ${sib.objectName} (the sibling Z interface view ` +
+        `being generated in this same deliverable). Do NOT SELECT FROM ${table} directly.`
+      );
+    }
+    if (lines.length > 0) {
+      ctx.grounding.push({
+        heading: 'Sibling wrapper views (this deliverable)',
+        tool:    'sibling_wrapper',
+        body:
+          `The TDS object list for this deliverable INCLUDES the following Z interface ` +
+          `views that wrap SAP standard tables. They will be generated and transported ` +
+          `alongside the current object, so they MUST be referenced — not the underlying tables:\n` +
+          lines.join('\n') +
+          `\n\nThis rule applies to every object in the deliverable EXCEPT the wrapper ` +
+          `view itself (a wrapper view is allowed to SELECT FROM its own underlying table).`
+      });
+    }
+  }
 
   // Nothing to ground -> skip MCP roundtrips entirely.
   const hasSomething =

@@ -84,52 +84,129 @@ function mcpPost(port: number, route: string, body: object, timeoutMs = 5000): P
 
 /**
  * Returns the unique field list referenced in the code's SELECT(s) against
- * `tableName`. Recognises three common ABAP SQL shapes:
- *   SELECT f1, f2, f3 FROM table ...
+ * `tableName`. Recognises four ABAP SQL shapes plus field-access references:
+ *   SELECT f1, f2, f3 FROM table ...      (comma-separated)
  *   SELECT f1 f2 f3 FROM table ...        (classic, comma-less)
- *   SELECT FROM table FIELDS f1, f2, f3 INTO ...
- * If only "SELECT * FROM table" appears, returns the special value [].
- * Caller treats [] as "expose * in the CDS — but Z CDS views can't use *,
- * so we'll emit a TODO with all-fields placeholder."
+ *   SELECT FROM table FIELDS f1, f2, ...  (newer)
+ *   SELECT * FROM table ...               (returns [] -> caller adds TODO)
+ *   <table>-<field>                       (structure access)
+ *   <alias>~<field>                       (table-aliased)
+ *
+ * Comments and CDS annotations are stripped BEFORE matching so we never
+ * pick up "Semantics.quantity.unitOfMeasure" as a field (the bug behind the
+ * generated ZI_LIKP showing `semanticsquantityunitofmeasure`).
+ *
+ * Every token is validated as a real ABAP identifier (1-30 chars, starts
+ * with letter or underscore, alphanumeric + underscore body) before
+ * being added. Tokens containing periods (annotation residue) are dropped
+ * entirely — never sanitised down to a fake identifier.
  */
 export function extractSelectedFields(code: string, tableName: string): string[] {
-  const lower = code.toLowerCase();
   const table = tableName.toLowerCase();
+  const escTable = escapeRegex(table);
   const fields = new Set<string>();
 
-  // Pattern 1: SELECT FROM <table> FIELDS f1, f2 ... (newer ABAP SQL)
-  const fieldsClauseRx = new RegExp(
-    `select\\s+(?:single\\s+)?(?:from\\s+${escapeRegex(table)}\\b[^]*?\\bfields\\s+([^]*?)\\b(?:into|where|up\\s+to|order\\s+by|group\\s+by|;|.\\s|$))`,
-    'gi'
-  );
-  // Pattern 2: SELECT f1, f2, ... FROM <table>
-  const classicRx = new RegExp(
-    `select\\s+(?:single\\s+)?(?!from\\b)([^]*?)\\s+from\\s+${escapeRegex(table)}\\b`,
-    'gi'
-  );
+  // 1. Preprocess: strip ABAP comments and CDS annotations so they cannot
+  //    leak into the field list.
+  const cleaned = preprocessCode(code);
+  const lower   = cleaned.toLowerCase();
 
-  for (const rx of [fieldsClauseRx, classicRx]) {
-    for (const m of lower.matchAll(rx)) {
-      const list = (m[1] ?? '').trim();
-      if (!list) continue;
-      if (list === '*') return [];   // signal "all fields"
-      // Split on whitespace OR comma; strip aliases like t~field
-      for (const tok of list.split(/[\s,]+/)) {
-        const cleaned = tok.replace(/.*~/, '').replace(/[^a-z0-9_]/gi, '');
-        if (cleaned.length > 0 && !ABAP_KEYWORDS.has(cleaned.toLowerCase())) {
-          fields.add(cleaned.toLowerCase());
-        }
-      }
-    }
+  // 2. SELECT [SINGLE] [DISTINCT] <fields> FROM <table>
+  //    Match field list between SELECT and FROM <table>. Conservative: only
+  //    accept content that doesn't span across newlines crossing other
+  //    SQL keywords.
+  const selectFromRx = new RegExp(
+    `\\bselect\\b(?:\\s+single)?(?:\\s+distinct)?\\s+((?!from\\b)[\\s\\S]+?)\\bfrom\\s+${escTable}\\b`,
+    'gi'
+  );
+  for (const m of lower.matchAll(selectFromRx)) {
+    const list = (m[1] ?? '').trim();
+    if (list === '*') return [];     // signal "all fields" — caller emits TODO
+    if (!list) continue;
+    extractTokensInto(list, fields);
   }
-  return Array.from(fields);
+
+  // 3. SELECT FROM <table> FIELDS f1, f2 ... [INTO|WHERE|ORDER|GROUP|...]
+  const fieldsClauseRx = new RegExp(
+    `\\bselect\\b(?:\\s+single)?\\s+from\\s+${escTable}\\b[\\s\\S]*?\\bfields\\s+([\\s\\S]+?)(?=\\b(?:into|where|inner|left|right|join|order|group|up\\s+to|having)\\b|\\.|;|$)`,
+    'gi'
+  );
+  for (const m of lower.matchAll(fieldsClauseRx)) {
+    extractTokensInto(m[1] ?? '', fields);
+  }
+
+  // 4. Structure-style references: <table>-<field>
+  const tableFieldRx = new RegExp(`\\b${escTable}-([a-z_][a-z0-9_]{0,29})\\b`, 'gi');
+  for (const m of lower.matchAll(tableFieldRx)) {
+    fields.add((m[1] ?? '').toLowerCase());
+  }
+
+  return Array.from(fields).filter(isValidAbapFieldName);
+}
+
+// ---------------------------------------------------------------------------
+// Preprocessing — strip comments + CDS annotations
+// ---------------------------------------------------------------------------
+
+function preprocessCode(code: string): string {
+  return code
+    .split('\n')
+    .map(line => {
+      // Strip full-line ABAP comments (asterisk at column 1)
+      if (/^\s*\*/.test(line)) return '';
+      // Strip CDS // line comments
+      const slashIdx = line.indexOf('//');
+      if (slashIdx >= 0) line = line.slice(0, slashIdx);
+      // Strip inline ABAP comments (" to end of line — approximation that
+      // does not honour quoted strings, but ABAP rarely has literal
+      // double-quotes mid-statement).
+      const quoteIdx = line.indexOf('"');
+      if (quoteIdx >= 0) line = line.slice(0, quoteIdx);
+      return line;
+    })
+    .join('\n')
+    // Strip CDS @key: value annotations (one line at a time)
+    .replace(/@[\w.]+\s*:\s*[^\n]+/g, '')
+    // Strip standalone @key tokens (boolean annotations)
+    .replace(/@[\w.]+/g, '');
+}
+
+// ---------------------------------------------------------------------------
+// Token extraction + validation
+// ---------------------------------------------------------------------------
+
+function extractTokensInto(list: string, set: Set<string>): void {
+  for (const raw of list.split(/[\s,]+/)) {
+    let tok = raw.trim();
+    if (tok.length === 0) continue;
+    // Strip table-alias prefix: t~field -> field
+    if (tok.includes('~')) tok = tok.split('~').pop()!;
+    // Drop tokens containing periods (annotation residue). Never sanitise
+    // away the periods — that's how we got `semanticsquantityunitofmeasure`.
+    if (tok.includes('.')) continue;
+    // Drop parentheses-containing tokens (CASE / function calls etc.)
+    if (/[()]/.test(tok)) continue;
+    // Drop ABAP keywords
+    if (ABAP_KEYWORDS.has(tok.toLowerCase())) continue;
+    // Drop ABAP type prefixes the field list shouldn't have
+    if (/^@/.test(tok)) continue;
+    // Must be a valid ABAP identifier (1-30 chars, starts with letter/underscore)
+    if (!isValidAbapFieldName(tok)) continue;
+    set.add(tok.toLowerCase());
+  }
+}
+
+function isValidAbapFieldName(name: string): boolean {
+  return /^[a-z_][a-z0-9_]{0,29}$/i.test(name);
 }
 
 const ABAP_KEYWORDS = new Set([
   'distinct', 'single', 'as', 'on', 'inner', 'left', 'right', 'outer',
   'join', 'where', 'into', 'table', 'data', 'and', 'or', 'not', 'in',
   'between', 'like', 'group', 'by', 'order', 'having', 'up', 'to', 'rows',
-  'with', 'fields', 'count', 'min', 'max', 'avg', 'sum'
+  'with', 'fields', 'count', 'min', 'max', 'avg', 'sum', 'case', 'when',
+  'then', 'else', 'end', 'null', 'is', 'exists', 'select', 'from',
+  'corresponding', 'of', 'all', 'any', 'some', 'union'
 ]);
 
 function escapeRegex(s: string): string {

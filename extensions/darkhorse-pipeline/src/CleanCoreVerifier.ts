@@ -120,11 +120,24 @@ const UI_FINDINGS: Array<{ rx: RegExp; reference: string; alternative: string; d
 // Match `FROM <TABLE>` and `FROM <TABLE> INTO/UP TO/WHERE/JOIN/CLIENT/AS/...`
 const RX_FROM_TABLE = /\bFROM\s+([A-Z][A-Z0-9_]+)\b/gi;
 
+// CPI-6 B5 — `expose ZI_<name>` inside a `define service` block. The Clean
+// Core three-layer rule requires service definitions to expose CONSUMPTION
+// views (ZC_*), not interface views (ZI_*). The capture group is the full
+// ZI_* name (without the ZI_ prefix kept intact so we can derive the ZC_
+// suggestion). Comments and whitespace before `expose` are tolerated.
+const RX_SERVICE_EXPOSE_ZI = /\bexpose\s+(ZI_[A-Z][A-Z0-9_]*)\b/gi;
+
+// We only count expose-ZI hits when the surrounding code is actually a
+// service definition. A simple presence check for `define service` is
+// sufficient because non-SRVD objects don't use the `expose` keyword.
+const RX_DEFINE_SERVICE = /\bdefine\s+service\b/i;
+
 interface ExtractedReferences {
-  exits:  Map<string, number>;
-  tables: Map<string, number>;
-  bapis:  Map<string, number>;
-  uis:    Map<string, number>;  // key = the canonical reference name from UI_FINDINGS
+  exits:    Map<string, number>;
+  tables:   Map<string, number>;
+  bapis:    Map<string, number>;
+  uis:      Map<string, number>;  // key = the canonical reference name from UI_FINDINGS
+  exposeZi: Map<string, number>;  // key = the ZI_* view exposed by a service def
 }
 
 function tally(map: Map<string, number>, key: string): void {
@@ -133,10 +146,11 @@ function tally(map: Map<string, number>, key: string): void {
 
 function extractReferences(code: string): ExtractedReferences {
   const out: ExtractedReferences = {
-    exits:  new Map<string, number>(),
-    tables: new Map<string, number>(),
-    bapis:  new Map<string, number>(),
-    uis:    new Map<string, number>()
+    exits:    new Map<string, number>(),
+    tables:   new Map<string, number>(),
+    bapis:    new Map<string, number>(),
+    uis:      new Map<string, number>(),
+    exposeZi: new Map<string, number>()
   };
 
   for (const m of code.matchAll(RX_USEREXIT)) {
@@ -162,6 +176,15 @@ function extractReferences(code: string): ExtractedReferences {
   for (const entry of UI_FINDINGS) {
     for (const _m of code.matchAll(entry.rx)) {
       tally(out.uis, entry.reference);
+    }
+  }
+
+  // CPI-6 B5 — service definitions that expose interface views (ZI_*) instead
+  // of consumption views (ZC_*). Only scanned when the code actually contains
+  // a `define service` statement to avoid false positives on other DDLS.
+  if (RX_DEFINE_SERVICE.test(code)) {
+    for (const m of code.matchAll(RX_SERVICE_EXPOSE_ZI)) {
+      tally(out.exposeZi, (m[1] ?? '').toUpperCase());
     }
   }
 
@@ -287,7 +310,8 @@ export async function verifyGeneratedCode(
     refs.exits.size === 0 &&
     refs.tables.size === 0 &&
     refs.bapis.size === 0 &&
-    refs.uis.size === 0;
+    refs.uis.size === 0 &&
+    refs.exposeZi.size === 0;
 
   if (nothingFound) {
     return {
@@ -309,7 +333,7 @@ export async function verifyGeneratedCode(
     return {
       verdict:        'skipped',
       scannedAt,
-      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size,
+      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size,
       countsByLevel:  emptyCounts(),
       findings:       [],
       mcpUnavailable: true,
@@ -437,6 +461,28 @@ export async function verifyGeneratedCode(
       alternative:  entry.alternative,
       occurrences:  count,
       acknowledged: ackFor(reference)
+    });
+  }
+
+  // ---- CPI-6 B5: service definition exposing ZI_* interface view ----------
+  // Clean Core three-layer rule: SRVD must expose ZC_* consumption views,
+  // not ZI_* interface views. Interface views bypass projection-layer
+  // metadata (UI/value-help/auth) and create a brittle service contract.
+  for (const [zi, count] of refs.exposeZi.entries()) {
+    const zc = 'ZC_' + zi.replace(/^ZI_/, '');
+    findings.push({
+      category:     'ui',
+      reference:    zi,
+      exists:       true,
+      level:        'B',
+      description:
+        `Service definition exposes ${zi}, an interface (ZI_*) view. Clean Core ` +
+        `three-layer pattern (interface → consumption → service) requires the ` +
+        `service to expose the consumption (ZC_*) projection so UI annotations, ` +
+        `value helps, and field-level auth all live in the projection layer.`,
+      alternative:  `expose ${zc} (consumption view) instead of ${zi}`,
+      occurrences:  count,
+      acknowledged: ackFor(zi)
     });
   }
 
