@@ -51,7 +51,7 @@ export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D';
 export type Verdict        = 'pass' | 'warn' | 'fail' | 'skipped';
 
 export interface CleanCoreFinding {
-  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf' | 'test';
+  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf' | 'test' | 'btp';
   reference:    string;          // raw token found in the source
   exists:       boolean | null;  // null if the tool doesn't return existence
   level:        CleanCoreLevel | null;
@@ -240,6 +240,9 @@ interface ExtractedReferences {
   /** Count of method bodies surfaced in the finding description so the
    *  developer sees the impact size at a glance. */
   methodCount: number;
+  /** CPI-6 A6 — ABAP Cloud / BTP forbidden statements. Key is the finding's
+   *  stable identifier (matches BTP_FINDINGS[].key). */
+  btp: Map<string, number>;
 }
 
 function tally(map: Map<string, number>, key: string): void {
@@ -258,6 +261,61 @@ const RX_CLASS_DEFINITION  = /\bCLASS\s+[A-Z_][A-Z0-9_]*\s+DEFINITION\b/gi;
 const RX_METHOD_BODY       = /\bMETHOD\s+[A-Z_][A-Z0-9_~]*\s*\.[\s\S]*?\bENDMETHOD\b/gi;
 const RX_FOR_TESTING_BLOCK = /\bCLASS\s+[A-Z_][A-Z0-9_]*\s+DEFINITION\s+(?:[^.]*\b)?FOR\s+TESTING\b/i;
 
+// CPI-6 A6 — ABAP Cloud / BTP forbidden statements. Each pattern flags a
+// statement that is not part of the released ABAP-for-Cloud-Development
+// language scope. Many of these still work on classic ABAP stacks, but if
+// the code is meant to deploy to ABAP Environment on BTP, S/4HANA Cloud
+// Public Edition, or any code unit marked "ABAP for Cloud Development",
+// they will not pass the syntax/release check.
+const BTP_FINDINGS: Array<{
+  /** Stable identifier used as both the finding key and ack token. */
+  key:         string;
+  rx:          RegExp;
+  description: string;
+  alternative: string;
+}> = [
+  {
+    key:         'CALL TRANSACTION',
+    rx:          /\bCALL\s+TRANSACTION\s+['"]/gi,
+    description: 'CALL TRANSACTION is not released for ABAP Cloud / ABAP for Cloud Development. It hops out of the OData/RAP service contract and the destination transaction may not even exist on the cloud stack.',
+    alternative: 'Expose the equivalent function as a RAP action / function on a behavior definition, or call the released OData service of the target app.'
+  },
+  {
+    key:         'LEAVE TO TRANSACTION',
+    rx:          /\bLEAVE\s+TO\s+TRANSACTION\b/gi,
+    description: 'LEAVE TO TRANSACTION is forbidden in ABAP Cloud. Same reasoning as CALL TRANSACTION — there is no SAP GUI session to leave to.',
+    alternative: 'Trigger the next step via a RAP action that returns a navigation target, or via an outbound OData service call.'
+  },
+  {
+    key:         'SUBMIT REPORT',
+    rx:          /\bSUBMIT\s+(?!\(\s*l)\w+/gi,
+    description: 'SUBMIT <report> targets a classic ABAP report; reports are not part of ABAP Cloud development. The submitted program may not even be released.',
+    alternative: 'Move the logic into a class method (or RAP action) and invoke it directly. If you really need batch execution, schedule a class via cl_bgmc / Business-Process-As-a-Service.'
+  },
+  {
+    key:         'OPEN DATASET',
+    rx:          /\bOPEN\s+DATASET\b/gi,
+    description: 'OPEN DATASET addresses the application-server filesystem, which is not exposed in ABAP Cloud. Files in the cloud are accessed through document services or attachments.',
+    alternative: 'Use Application-Job / Document-Service / Attachment-Service APIs (cl_dms_*, cl_bdef_attachment) or pull/push the file via SFTP through a Communication Arrangement.'
+  },
+  {
+    key:         'WAIT UP TO',
+    rx:          /\bWAIT\s+UP\s+TO\b/gi,
+    description: 'WAIT UP TO ... SECONDS is forbidden in ABAP Cloud — it blocks the work process, which the cloud runtime will not tolerate.',
+    alternative: 'If you need polling, restructure as an asynchronous workflow: emit a business event, let the consumer subscribe. If you need throttling, use the workload-management framework.'
+  },
+  {
+    key:         'CALL FUNCTION DESTINATION literal',
+    /** Matches CALL FUNCTION '...' DESTINATION '<literal-rfc-dest>'. We
+     *  only flag DESTINATION '<single-quoted-literal>' to avoid false-
+     *  positives on DESTINATION lv_dest where the destination is sourced
+     *  from a properly resolved Communication Arrangement. */
+    rx:          /\bCALL\s+FUNCTION\s+['"][^'"]+['"][\s\S]{0,80}?\bDESTINATION\s+['"][^'"]+['"]/gi,
+    description: 'Hard-coded RFC destination literals are not portable to ABAP Cloud. Cloud RFC calls must be brokered through a Communication Arrangement so the destination name is resolved from customizing.',
+    alternative: "Look up the destination via cl_com_arrangement_factory=>create_arrangement_factory( )->get_arrangement( comm_scenario = 'Z_<SCN>' ... ) and pass the resolved destination to CALL FUNCTION."
+  }
+];
+
 function extractReferences(code: string): ExtractedReferences {
   const out: ExtractedReferences = {
     exits:          new Map<string, number>(),
@@ -271,7 +329,8 @@ function extractReferences(code: string): ExtractedReferences {
     isBehaviorImpl: RX_BEHAVIOR_IMPL.test(code),
     perf:           new Map<PerfFindingKey, number>(),
     missingTests:   false,
-    methodCount:    0
+    methodCount:    0,
+    btp:            new Map<string, number>()
   };
 
   for (const m of code.matchAll(RX_USEREXIT)) {
@@ -328,6 +387,15 @@ function extractReferences(code: string): ExtractedReferences {
   if (classDefMatches.length > 0 && methodBodyCount >= 2 && !hasForTesting) {
     out.missingTests = true;
     out.methodCount  = methodBodyCount;
+  }
+
+  // CPI-6 A6 — ABAP Cloud / BTP forbidden statements. Each pattern counts
+  // independently so we can show occurrence counts in the finding card.
+  for (const entry of BTP_FINDINGS) {
+    const count = (code.match(entry.rx) ?? []).length;
+    if (count > 0) {
+      out.btp.set(entry.key, count);
+    }
   }
 
   // FROM-clause table extraction: skip anything that isn't a known SAP
@@ -518,7 +586,8 @@ export async function verifyGeneratedCode(
     refs.interfaceAnn.size === 0 &&
     refs.authChecks.size === 0 &&
     refs.perf.size === 0 &&
-    !refs.missingTests;
+    !refs.missingTests &&
+    refs.btp.size === 0;
 
   if (nothingFound) {
     return {
@@ -540,7 +609,7 @@ export async function verifyGeneratedCode(
     return {
       verdict:        'skipped',
       scannedAt,
-      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size + refs.perf.size + (refs.missingTests ? 1 : 0),
+      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size + refs.perf.size + (refs.missingTests ? 1 : 0) + refs.btp.size,
       countsByLevel:  emptyCounts(),
       findings:       [],
       mcpUnavailable: true,
@@ -719,6 +788,22 @@ export async function verifyGeneratedCode(
         `aspect pfcg_auth '${authObj}' ... ; }`,
       occurrences:  count,
       acknowledged: ackFor(`AUTHORITY-CHECK ${authObj}`)
+    });
+  }
+
+  // ---- CPI-6 A6: ABAP Cloud / BTP forbidden statements ---------------------
+  for (const [key, count] of refs.btp.entries()) {
+    const entry = BTP_FINDINGS.find(e => e.key === key);
+    if (!entry) continue;
+    findings.push({
+      category:     'btp',
+      reference:    key,
+      exists:       true,
+      level:        'B',
+      description:  entry.description,
+      alternative:  entry.alternative,
+      occurrences:  count,
+      acknowledged: ackFor(key)
     });
   }
 

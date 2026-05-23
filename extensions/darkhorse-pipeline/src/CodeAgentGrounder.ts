@@ -47,7 +47,7 @@ export interface GroundingItem {
   /** Free-form heading shown in the system prompt block. */
   heading:  string;
   /** Tool that produced this item. */
-  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern' | 'sibling_wrapper' | 'layer_role' | 'hana_pushdown';
+  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern' | 'sibling_wrapper' | 'layer_role' | 'hana_pushdown' | 'cloud_readiness';
   /** Pre-rendered markdown-ish text to inject into the prompt. */
   body:     string;
 }
@@ -182,6 +182,51 @@ async function isMcpUp(port: number): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Cloud-readiness grounding — CPI-6 A6
+// ---------------------------------------------------------------------------
+
+/**
+ * Emit ABAP Cloud / BTP cloud-readiness rules. Deterministic — no MCP, no
+ * retrieval. Fires for the same object types as the HANA push-down block
+ * (PROG / CLAS / FUNC), since DDLS / BDEF / SRVD / SRVB / DCLS are by
+ * construction cloud-compatible artefacts.
+ */
+function detectCloudReadinessGrounding(obj: AbapObject): GroundingItem | null {
+  const type = (obj.objectType ?? '').trim().toUpperCase();
+  if (type !== 'PROG' && type !== 'CLAS' && type !== 'FUNC') return null;
+  return {
+    heading: 'ABAP Cloud / BTP readiness',
+    tool:    'cloud_readiness',
+    body:
+      `Treat this code as ABAP-for-Cloud-Development (ABAP Environment on BTP, ` +
+      `S/4HANA Cloud Public Edition, or any cloud-flagged code unit). The ` +
+      `following statements are NOT released and MUST NOT appear in your ` +
+      `output — every one will fail the cloud syntax check:\n\n` +
+      `  - CALL TRANSACTION '<txn>' / LEAVE TO TRANSACTION — no SAP GUI ` +
+      `at runtime. Expose the action through a RAP action on the behavior ` +
+      `definition instead, or invoke the target's released OData service.\n` +
+      `  - SUBMIT <report> — classic reports are not part of cloud scope. ` +
+      `Lift the logic into a class method and call it directly, or ` +
+      `schedule a class via cl_bgmc (Background Processing as a Service).\n` +
+      `  - CALL SCREEN <n> / dynpro — no classic screens in the cloud.\n` +
+      `  - OPEN DATASET — no application-server filesystem access. Use ` +
+      `document services, attachments, or pull/push the payload via an ` +
+      `SFTP Communication Arrangement.\n` +
+      `  - WAIT UP TO ... SECONDS — blocks the work process. Restructure ` +
+      `as an asynchronous workflow (business event + subscriber).\n` +
+      `  - CALL FUNCTION '<rfc>' DESTINATION '<literal>' — no hard-coded ` +
+      `destinations. Resolve the destination via Communication Arrangement: ` +
+      `cl_com_arrangement_factory=>create_arrangement_factory( ) and pass ` +
+      `the resolved cl_dest_* object to CALL FUNCTION.\n\n` +
+      `Released alternative reference: only APIs marked "released for Cloud ` +
+      `Development" in the SAP API Hub or shipped under sap.* / cl_ released ` +
+      `namespaces may be used. When in doubt, prefer RAP actions, business ` +
+      `events, application log (SLG1), and OData consumption over any ` +
+      `classic ABAP communication primitive.`
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +571,13 @@ export async function groundObjectForGeneration(
     ctx.grounding.push(pushdownItem);
   }
 
+  // CPI-6 A6 — ABAP Cloud / BTP cloud-readiness grounding. Deterministic, no
+  // MCP. Fires for PROG/CLAS/FUNC to enumerate the forbidden statement set.
+  const cloudItem = detectCloudReadinessGrounding(obj);
+  if (cloudItem) {
+    ctx.grounding.push(cloudItem);
+  }
+
   // CPI-6 B4 — sibling wrapper grounding runs deterministically before MCP.
   // It tells the LLM that a Z wrapper view for an SAP standard table is
   // being generated in this same deliverable, so any read access on that
@@ -792,7 +844,7 @@ function inferEntityHint(obj: AbapObject, sapTables: string[]): string {
 export function renderGroundingForPrompt(ctx: GroundingContext): string {
   // Deterministic items (layer_role, sibling_wrapper) ship regardless of MCP
   // availability — they're computed from TDS metadata, not retrieved.
-  const deterministicTools = new Set(['layer_role', 'sibling_wrapper', 'hana_pushdown']);
+  const deterministicTools = new Set(['layer_role', 'sibling_wrapper', 'hana_pushdown', 'cloud_readiness']);
   const deterministicItems = ctx.grounding.filter(g => deterministicTools.has(g.tool));
   const retrievedItems     = ctx.grounding.filter(g => !deterministicTools.has(g.tool));
 
