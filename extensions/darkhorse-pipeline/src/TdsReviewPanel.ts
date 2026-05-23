@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { TdsDocument } from './DocxWriter';
 import { PipelineStateManager } from './PipelineStateManager';
 import { PipelineTracker } from './PipelineTracker';
+import { verifyThreeLayer, renderThreeLayerSummary } from './ThreeLayerVerifier';
 
 export class TdsReviewPanel {
 
@@ -94,6 +95,30 @@ export class TdsReviewPanel {
           codeAccepted: false
         }));
         await this.stateManager.setState(state);
+      }
+    }
+
+    // CPI-6 A1 — three-layer Clean Core check. Runs against the FINAL (possibly
+    // developer-edited) abapObjectList. Surfaces missing ZI_/ZC_/ZUI_/ZUI_*_O4
+    // layers BEFORE code generation so the developer can either add the
+    // missing objects or acknowledge that this is an intentional partial
+    // delivery (e.g. read-only entity with a separate service in another TR).
+    const state = this.stateManager.getState();
+    const abapObjects = state?.abapObjects ?? [];
+    const layerReport = verifyThreeLayer(abapObjects);
+    if (!layerReport.pass) {
+      const summary = renderThreeLayerSummary(layerReport);
+      const choice = await vscode.window.showWarningMessage(
+        `DarkHorse Clean Core: ${layerReport.totalMissing} missing layer(s) across ` +
+        `${layerReport.clusters.filter(c => c.missing.length > 0).length} entity cluster(s). ` +
+        `Continue without adding them, or go back and edit the TDS object list?`,
+        { modal: true, detail: summary },
+        'Continue Anyway',
+        'Edit TDS'
+      );
+      if (choice !== 'Continue Anyway') {
+        // Developer wants to edit. Leave the panel open, don't approve.
+        return;
       }
     }
 

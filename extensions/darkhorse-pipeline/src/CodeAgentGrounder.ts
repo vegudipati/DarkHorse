@@ -47,7 +47,7 @@ export interface GroundingItem {
   /** Free-form heading shown in the system prompt block. */
   heading:  string;
   /** Tool that produced this item. */
-  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern' | 'sibling_wrapper';
+  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern' | 'sibling_wrapper' | 'layer_role';
   /** Pre-rendered markdown-ish text to inject into the prompt. */
   body:     string;
 }
@@ -185,6 +185,127 @@ async function isMcpUp(port: number): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Layer role detection — CPI-6 A1
+// ---------------------------------------------------------------------------
+
+/**
+ * Identify which Clean Core three-layer role the current object plays and
+ * return prompt-ready instructions specific to that role. Returns null when
+ * the object doesn't fit a recognized layer pattern — most non-CDS objects
+ * fall through here and the grounder skips the layer-role block.
+ */
+function detectLayerRoleGrounding(obj: AbapObject): GroundingItem | null {
+  const name = (obj.objectName ?? '').trim().toUpperCase();
+  const type = (obj.objectType ?? '').trim().toUpperCase();
+
+  // Order matters: SRVB binding (_O4) before SRVD service.
+  if (type === 'SRVB' && /^ZUI_[A-Z][A-Z0-9_]*_O4$/.test(name)) {
+    const stem = name.replace(/^ZUI_/, '').replace(/_O4$/, '');
+    return {
+      heading: 'Clean Core layer role: Service Binding (SRVB, OData v4)',
+      tool:    'layer_role',
+      body:
+        `You are generating the service binding ${name}. Required shape:\n\n` +
+        `  - Binding type: OData V4\n` +
+        `  - Binding scope: ODATA\n` +
+        `  - Service definition referenced: ZUI_${stem}\n\n` +
+        `Do NOT redeclare entities here. Service bindings only point at a ` +
+        `service definition; the entity set is taken from the SRVD's exposed view.`
+    };
+  }
+
+  if (type === 'SRVD' && /^ZUI_[A-Z][A-Z0-9_]*$/.test(name)) {
+    const stem = name.replace(/^ZUI_/, '');
+    return {
+      heading: 'Clean Core layer role: Service Definition (SRVD)',
+      tool:    'layer_role',
+      body:
+        `You are generating the service definition ${name}. STRICT rules:\n\n` +
+        `  - The body must read: define service ${name} { expose ZC_${stem}; }\n` +
+        `  - You MUST expose the consumption view ZC_${stem}.\n` +
+        `  - You MUST NOT expose the interface view ZI_${stem} directly. ` +
+        `Interface views skip the projection layer (UI annotations, value ` +
+        `helps, field-level authorization) and produce a brittle service ` +
+        `contract — the Clean Core verifier flags this as a violation.\n` +
+        `  - Add a @AccessControl.authorizationCheck: #CHECK annotation.`
+    };
+  }
+
+  if (type === 'DDLS' && /^ZI_[A-Z][A-Z0-9_]*$/.test(name)) {
+    const stem = name.replace(/^ZI_/, '');
+    return {
+      heading: 'Clean Core layer role: Interface CDS View (ZI_*)',
+      tool:    'layer_role',
+      body:
+        `You are generating the interface view ${name}. STRICT rules:\n\n` +
+        `  - Interface views are PURE projections of source data. Project ` +
+        `every business-meaningful field from the source table or composite ` +
+        `view; rename only when SAP naming conventions demand it.\n` +
+        `  - DO NOT emit any of these annotations on this view: ` +
+        `@UI.*, @Search.searchable, @ObjectModel.*, @ObjectModel.semanticKey, ` +
+        `@Consumption.*. They belong on the consumption view ZC_${stem}.\n` +
+        `  - Required header annotations: @AccessControl.authorizationCheck: #CHECK ` +
+        `and @EndUserText.label: '<short description>'.\n` +
+        `  - Allowed: associations to other ZI_* views and to SAP I_* released views.`
+    };
+  }
+
+  if (type === 'DDLS' && /^ZC_[A-Z][A-Z0-9_]*$/.test(name)) {
+    const stem = name.replace(/^ZC_/, '');
+    return {
+      heading: 'Clean Core layer role: Consumption CDS View (ZC_*)',
+      tool:    'layer_role',
+      body:
+        `You are generating the consumption view ${name}. STRICT rules:\n\n` +
+        `  - This view MUST project from the interface view ZI_${stem} ` +
+        `(define view entity ${name} as projection on ZI_${stem}). Do not ` +
+        `SELECT FROM raw tables here.\n` +
+        `  - @UI annotations live HERE, not on the interface view. Add ` +
+        `@UI.headerInfo, @UI.lineItem, @UI.identification, @UI.selectionField ` +
+        `as appropriate for the Fiori Elements floorplan.\n` +
+        `  - Add @Search.searchable: true on the entity and @Search.defaultSearchElement: ` +
+        `true on text-bearing fields.\n` +
+        `  - Add @ObjectModel.semanticKey: [ '...' ] reflecting the key.\n` +
+        `  - Required header annotations: @AccessControl.authorizationCheck: #CHECK ` +
+        `and @EndUserText.label: '<short description>'.`
+    };
+  }
+
+  if (type === 'BDEF' && /^ZI_[A-Z][A-Z0-9_]*$/.test(name)) {
+    return {
+      heading: 'Clean Core layer role: Behavior Definition (BDEF)',
+      tool:    'layer_role',
+      body:
+        `You are generating the behavior definition for ${name}. Required shape:\n\n` +
+        `  - First line: managed implementation in class ZBP_${name} unique;\n` +
+        `  - Define behavior for ${name} alias <Entity>\n` +
+        `  - Declare CREATE / UPDATE / DELETE only for operations the TDS ` +
+        `key logic explicitly calls for. Read-only entities omit this.\n` +
+        `  - Persistent table reference uses the underlying Z table when one ` +
+        `exists in this deliverable; otherwise the LLM must NOT invent a ` +
+        `persistent-table name.`
+    };
+  }
+
+  if (type === 'CLAS' && /^ZBP_I_[A-Z][A-Z0-9_]*$/.test(name)) {
+    const stem = name.replace(/^ZBP_I_/, '');
+    return {
+      heading: 'Clean Core layer role: Behavior Projection Class (ZBP_I_*)',
+      tool:    'layer_role',
+      body:
+        `You are generating the behavior projection class ${name} for ` +
+        `entity ZI_${stem}. STRICT rules:\n\n` +
+        `  - CLASS ${name} DEFINITION PUBLIC ABSTRACT FINAL FOR BEHAVIOR OF ZI_${stem}.\n` +
+        `  - Implement only determinations, validations, and actions the ` +
+        `BDEF declares. Do not invent behaviors not in the BDEF.\n` +
+        `  - Use EML (MODIFY ENTITIES OF ${name}) for any side-effect writes.`
+    };
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Sibling wrapper detection — CPI-6 B4
 // ---------------------------------------------------------------------------
 
@@ -249,6 +370,16 @@ export async function groundObjectForGeneration(
     grounding:       [],
     detected
   };
+
+  // CPI-6 A1 — layer-role grounding. Deterministic, no MCP. When the current
+  // object plays a recognized Clean Core three-layer role, inject strict
+  // per-role rules so the LLM places annotations / projections / exposes
+  // correctly. This is the single biggest lever for layering correctness —
+  // pre-LLM grounding is far more reliable than post-LLM rewriting.
+  const layerItem = detectLayerRoleGrounding(obj);
+  if (layerItem) {
+    ctx.grounding.push(layerItem);
+  }
 
   // CPI-6 B4 — sibling wrapper grounding runs deterministically before MCP.
   // It tells the LLM that a Z wrapper view for an SAP standard table is
@@ -514,13 +645,35 @@ function inferEntityHint(obj: AbapObject, sapTables: string[]): string {
 // ---------------------------------------------------------------------------
 
 export function renderGroundingForPrompt(ctx: GroundingContext): string {
+  // Deterministic items (layer_role, sibling_wrapper) ship regardless of MCP
+  // availability — they're computed from TDS metadata, not retrieved.
+  const deterministicTools = new Set(['layer_role', 'sibling_wrapper']);
+  const deterministicItems = ctx.grounding.filter(g => deterministicTools.has(g.tool));
+  const retrievedItems     = ctx.grounding.filter(g => !deterministicTools.has(g.tool));
+
   if (ctx.mcpUnavailable) {
+    // When MCP is down we still emit deterministic blocks so layer-role rules
+    // reach the LLM. A short banner explains the partial degradation.
+    if (deterministicItems.length === 0) {
+      return [
+        '## Grounded SAP knowledge (CPI-6 Sprint 3)',
+        '',
+        'The DarkHorse MCP server is currently unreachable. Generation is proceeding ',
+        'WITHOUT grounded knowledge. Apply Clean Core rules carefully and rely on the ',
+        'post-generation Clean Core verifier to catch defects.'
+      ].join('\n');
+    }
+    const blocks = deterministicItems.map(g =>
+      `### ${g.heading}\nSource: ${g.tool}\n\n${g.body}`
+    ).join('\n\n');
     return [
       '## Grounded SAP knowledge (CPI-6 Sprint 3)',
       '',
-      'The DarkHorse MCP server is currently unreachable. Generation is proceeding ',
-      'WITHOUT grounded knowledge. Apply Clean Core rules carefully and rely on the ',
-      'post-generation Clean Core verifier to catch defects.'
+      'The DarkHorse MCP server is currently unreachable. The retrieved-knowledge ',
+      'blocks (CDS view names, EML templates, RAP patterns) are omitted for this ',
+      'run. The following deterministic Clean Core rules still apply:',
+      '',
+      blocks
     ].join('\n');
   }
   if (ctx.grounding.length === 0) {
@@ -530,6 +683,8 @@ export function renderGroundingForPrompt(ctx: GroundingContext): string {
   const blocks = ctx.grounding.map(g =>
     `### ${g.heading}\nSource: ${g.tool}\n\n${g.body}`
   ).join('\n\n');
+  // Suppress unused-variable warning when only one branch is active.
+  void retrievedItems;
 
   return [
     '## Grounded SAP knowledge (CPI-6 Sprint 3)',
