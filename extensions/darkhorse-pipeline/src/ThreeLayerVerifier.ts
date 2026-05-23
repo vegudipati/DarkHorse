@@ -329,6 +329,143 @@ export function verifyThreeLayer(objects: ReadonlyArray<AbapObject>): ThreeLayer
 }
 
 // ---------------------------------------------------------------------------
+// Synthesis — auto-fill missing layers so the developer doesn't have to
+// hand-edit the TDS for every pipeline iteration. CPI-6 A1 follow-on.
+// ---------------------------------------------------------------------------
+
+/** Tag prefix on the description so the developer (and downstream tooling)
+ *  can identify objects DarkHorse added automatically vs. ones the TDS Agent
+ *  produced from the BR/FDS. */
+export const AUTOFILL_TAG = '[DarkHorse auto-added]';
+
+function synthesisDescription(role: LayerRole, entity: string): string {
+  const human: Record<LayerRole, string> = {
+    interface:      `interface CDS view`,
+    consumption:    `consumption CDS view`,
+    behaviorProj:   `behavior projection class`,
+    behaviorDef:    `behavior definition`,
+    serviceDef:     `service definition`,
+    serviceBinding: `OData V4 service binding`,
+    dcl:            `DCL access role`,
+    test:           `ABAP Unit test class`
+  };
+  return `${AUTOFILL_TAG} ${human[role]} for ${entity} — added to satisfy the Clean Core three-layer requirement.`;
+}
+
+/** Per-role keyLogic that gives the Code Agent enough scaffolding. The bulk
+ *  of the layer-specific rules (skeletons, prohibitions) come from
+ *  CodeAgentGrounder.detectLayerRoleGrounding at code-generation time;
+ *  keyLogic only needs to point in the right direction. */
+function synthesisKeyLogic(role: LayerRole, entity: string): string[] {
+  switch (role) {
+    case 'interface':
+      return [
+        `Define a pure interface view ZI_${entity} projecting fields from the underlying source table(s).`,
+        `Annotate with @AccessControl.authorizationCheck: #CHECK and @EndUserText.label.`,
+        `Do not carry @UI / @Search / @ObjectModel annotations — those live on ZC_${entity}.`
+      ];
+    case 'consumption':
+      return [
+        `Define ZC_${entity} as projection on ZI_${entity}.`,
+        `Add @UI.headerInfo / @UI.lineItem / @UI.identification / @UI.selectionField appropriate to the Fiori Elements floorplan in the FDS.`,
+        `Add @Search.searchable: true and @ObjectModel.semanticKey reflecting the entity key.`
+      ];
+    case 'serviceDef':
+      return [
+        `define service ZUI_${entity} { expose ZC_${entity}; }`,
+        `Add @AccessControl.authorizationCheck: #CHECK.`,
+        `Do NOT expose ZI_${entity} — interface views skip the projection layer.`
+      ];
+    case 'serviceBinding':
+      return [
+        `OData V4 service binding ZUI_${entity}_O4 over service definition ZUI_${entity}.`,
+        `Binding type: ODATA / V4. Scope: ODATA. No entity-set redeclaration — the entity set comes from the SRVD.`
+      ];
+    case 'dcl':
+      return [
+        `DCL role ZI_${entity} protecting interface view ZI_${entity}.`,
+        `Use \`grant select on ZI_${entity} where (<filter expression>) = aspect pfcg_auth ( <PFCG_OBJECT>, ACTVT = '03' );\`.`,
+        `The role name must match the protected view name (SAP DCL inference convention).`
+      ];
+    case 'behaviorDef':
+      return [
+        `Behavior definition for ZI_${entity}. First line: managed implementation in class ZBP_ZI_${entity} unique;`,
+        `Declare CREATE / UPDATE / DELETE only for operations the BR/FDS explicitly requires.`,
+        `Persistent table reference must use a Z table that exists in this deliverable; otherwise omit and let the verifier flag.`
+      ];
+    case 'behaviorProj':
+      return [
+        `CLASS ZBP_I_${entity} DEFINITION PUBLIC ABSTRACT FINAL FOR BEHAVIOR OF ZI_${entity}.`,
+        `Implement only the determinations / validations / actions the BDEF declares.`,
+        `Do not emit AUTHORITY-CHECK — authorization comes from the DCL role ZI_${entity}.`
+      ];
+    case 'test':
+      return [
+        `Global ABAP Unit test class ZCL_TEST_${entity} for ZI_${entity}.`,
+        `Use cl_cds_test_environment=>create( i_for_entity = 'ZI_${entity}' ) and cl_abap_unit_assert assertions.`,
+        `Cover: at least one test per validation, one per determination, one happy-path EML round-trip.`
+      ];
+  }
+}
+
+function synthesisDependencies(role: LayerRole, entity: string, cluster: EntityCluster): string[] {
+  const deps: string[] = [];
+  switch (role) {
+    case 'consumption':    deps.push(`ZI_${entity}`); break;
+    case 'serviceDef':     deps.push(`ZC_${entity}`); break;
+    case 'serviceBinding': deps.push(`ZUI_${entity}`); break;
+    case 'dcl':            deps.push(`ZI_${entity}`); break;
+    case 'behaviorDef':    deps.push(`ZI_${entity}`); break;
+    case 'behaviorProj':   deps.push(`ZI_${entity}`); if (cluster.present.behaviorDef) deps.push(cluster.present.behaviorDef.objectName); break;
+    case 'test':           deps.push(`ZI_${entity}`); break;
+    case 'interface':      /* no dependency — bottom layer */ break;
+  }
+  return deps;
+}
+
+export interface AutoFillResult {
+  filled: AbapObject[];                                          // complete object list
+  added:  Array<{ role: LayerRole; entity: string; object: AbapObject }>;
+}
+
+/**
+ * Build a fresh AbapObject for every missing layer reported by verifyThreeLayer
+ * and append it to the input list. Stable: same input produces the same
+ * output. Sequence numbers continue from the input's max + 1.
+ *
+ * The returned `added` array is what the caller surfaces in a toast / log so
+ * the developer sees what was filled in.
+ */
+export function synthesizeMissingLayers(
+  objects: ReadonlyArray<AbapObject>
+): AutoFillResult {
+  const report = verifyThreeLayer(objects);
+  if (report.pass) return { filled: objects.slice(), added: [] };
+
+  const filled: AbapObject[] = objects.slice();
+  const added:  AutoFillResult['added'] = [];
+  let nextSeq = filled.reduce((max, o) => Math.max(max, o.sequence ?? 0), 0) + 1;
+
+  for (const cluster of report.clusters) {
+    for (const miss of cluster.missing) {
+      const obj: AbapObject = {
+        sequence:       nextSeq++,
+        objectType:     miss.objectType,
+        objectName:     miss.suggestedName,
+        description:    synthesisDescription(miss.role, cluster.entity),
+        keyLogic:       synthesisKeyLogic(miss.role, cluster.entity),
+        dependencies:   synthesisDependencies(miss.role, cluster.entity, cluster),
+        codeGenerated:  false,
+        codeAccepted:   false
+      };
+      filled.push(obj);
+      added.push({ role: miss.role, entity: cluster.entity, object: obj });
+    }
+  }
+  return { filled, added };
+}
+
+// ---------------------------------------------------------------------------
 // Human-readable rendering — used by the TDS panel modal
 // ---------------------------------------------------------------------------
 

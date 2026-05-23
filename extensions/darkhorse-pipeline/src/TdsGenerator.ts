@@ -14,6 +14,7 @@ import {
 import { renderStandardsForPrompt } from './StandardsLoader';
 import { resolveTemplate }           from './TemplateConfig';
 import { renderIntoTemplateFile }    from './TemplateRenderer';
+import { synthesizeMissingLayers }   from './ThreeLayerVerifier';
 
 export { TdsDocument };
 
@@ -81,8 +82,13 @@ export class TdsGenerator {
 
         const tdsDoc = TdsGenerator.parseResponse(rawContent, state, fdsDoc, solutionOverview);
 
-        // Extract ABAP objects from TDS
-        const abapObjects: AbapObject[] = tdsDoc.sections.abapObjectList.map(obj => ({
+        // Build the AbapObject[] from the TDS doc and immediately run the
+        // Clean Core three-layer auto-fill so every iteration starts with
+        // the complete required set: ZI_/ZC_/SRVD/SRVB/DCL (plus BDEF/
+        // ZBP_I_/test for transactional clusters). The synthesised objects
+        // appear in the TDS Review panel and the Word render; the developer
+        // can edit / remove any of them before approval.
+        const rawAbapObjects: AbapObject[] = tdsDoc.sections.abapObjectList.map(obj => ({
           sequence: obj.sequence,
           objectType: obj.objectType,
           objectName: obj.objectName,
@@ -92,6 +98,27 @@ export class TdsGenerator {
           codeGenerated: false,
           codeAccepted: false
         }));
+        const autoFill = synthesizeMissingLayers(rawAbapObjects);
+        const abapObjects: AbapObject[] = autoFill.filled;
+        if (autoFill.added.length > 0) {
+          // Mirror synthesised objects back into the TDS doc's lightweight
+          // list so the Word render and the panel display the complete set.
+          tdsDoc.sections.abapObjectList = abapObjects.map(o => ({
+            sequence:     o.sequence,
+            objectType:   o.objectType,
+            objectName:   o.objectName,
+            description:  o.description,
+            keyLogic:     o.keyLogic,
+            dependencies: o.dependencies
+          }));
+          const summary = autoFill.added
+            .map(a => `${a.object.objectType} ${a.object.objectName}`)
+            .join(', ');
+          vscode.window.showInformationMessage(
+            `DarkHorse: Auto-added ${autoFill.added.length} Clean Core layer object(s) — ` +
+            `${summary}. Review them in the TDS panel; remove any you don't need before approving.`
+          );
+        }
 
         // Write .docx
         const fileName = `${state.title.replace(/[^a-zA-Z0-9]/g, '_')}_TDS_v1_0.docx`;
