@@ -132,12 +132,73 @@ const RX_SERVICE_EXPOSE_ZI = /\bexpose\s+(ZI_[A-Z][A-Z0-9_]*)\b/gi;
 // sufficient because non-SRVD objects don't use the `expose` keyword.
 const RX_DEFINE_SERVICE = /\bdefine\s+service\b/i;
 
+// CPI-6 A2 — `define view (entity) ZI_<name>` identifies the file as an
+// INTERFACE view. The capture group is the entity stem so we can suggest
+// the corresponding ZC_<stem> consumption view in the finding alternative.
+const RX_DEFINE_INTERFACE_VIEW = /\bdefine\s+view\s+(?:entity\s+)?ZI_([A-Z][A-Z0-9_]*)\b/i;
+
+// CPI-6 A2 — consumption-layer annotations that must NOT appear on a ZI_*
+// interface view. These annotations belong on the ZC_* projection layer
+// so the interface view stays a pure data projection and the projection
+// layer owns UI / search / object-model metadata.
+//
+// Excluded by design (allowed on interface views):
+//   - @ObjectModel.dataCategory     — table classification (header / dimension / etc.)
+//   - @ObjectModel.representativeKey — released-view modeling primitive
+//   - @ObjectModel.usageType        — released-view contract metadata
+//   - @AccessControl.authorizationCheck — required on ALL ZI_* and ZC_* views
+//   - @EndUserText.label            — descriptive only, no layering concern
+const FORBIDDEN_INTERFACE_ANNOTATIONS: Array<{
+  /** Substring match (lowercased) for the annotation prefix. */
+  prefix:   string;
+  /** Display label used in the finding. */
+  label:    string;
+  /** Why this annotation belongs on the consumption view. */
+  reason:   string;
+}> = [
+  {
+    prefix: '@ui.',
+    label:  '@UI.*',
+    reason: 'Fiori Elements floorplan metadata (headerInfo / lineItem / identification / selectionField) is part of the consumption-layer contract.'
+  },
+  {
+    prefix: '@search.searchable',
+    label:  '@Search.searchable',
+    reason: 'Search exposure is a consumption-layer concern — it changes the OData service shape, not the underlying data projection.'
+  },
+  {
+    prefix: '@search.defaultsearchelement',
+    label:  '@Search.defaultSearchElement',
+    reason: 'Default search element targets the consumption layer (drives the Fiori value-help and search dialog).'
+  },
+  {
+    prefix: '@objectmodel.semantickey',
+    label:  '@ObjectModel.semanticKey',
+    reason: 'Semantic key wiring is a consumption-layer projection concern; the interface view exposes the technical key only.'
+  },
+  {
+    prefix: '@consumption.',
+    label:  '@Consumption.*',
+    reason: '@Consumption annotations (filter / valueHelpDefault / labelElement) are by definition consumption-layer.'
+  }
+];
+
+// Match any `@<token>` annotation occurrence (the full annotation up to the
+// first whitespace or `:` so we can classify it deterministically).
+const RX_ANY_ANNOTATION = /@[A-Za-z][A-Za-z0-9_.]*/g;
+
 interface ExtractedReferences {
   exits:    Map<string, number>;
   tables:   Map<string, number>;
   bapis:    Map<string, number>;
   uis:      Map<string, number>;  // key = the canonical reference name from UI_FINDINGS
   exposeZi: Map<string, number>;  // key = the ZI_* view exposed by a service def
+  /** Consumption-layer annotations found inside an interface view. Key is the
+   *  display label (e.g. "@UI.*"); value is the occurrence count. The stem of
+   *  the ZI_* view is stored separately so the finding alternative can name
+   *  the corresponding ZC_<stem>. CPI-6 A2. */
+  interfaceAnn: Map<string, number>;
+  interfaceStem: string | null;
 }
 
 function tally(map: Map<string, number>, key: string): void {
@@ -146,11 +207,13 @@ function tally(map: Map<string, number>, key: string): void {
 
 function extractReferences(code: string): ExtractedReferences {
   const out: ExtractedReferences = {
-    exits:    new Map<string, number>(),
-    tables:   new Map<string, number>(),
-    bapis:    new Map<string, number>(),
-    uis:      new Map<string, number>(),
-    exposeZi: new Map<string, number>()
+    exits:         new Map<string, number>(),
+    tables:        new Map<string, number>(),
+    bapis:         new Map<string, number>(),
+    uis:           new Map<string, number>(),
+    exposeZi:      new Map<string, number>(),
+    interfaceAnn:  new Map<string, number>(),
+    interfaceStem: null
   };
 
   for (const m of code.matchAll(RX_USEREXIT)) {
@@ -188,7 +251,41 @@ function extractReferences(code: string): ExtractedReferences {
     }
   }
 
+  // CPI-6 A2 — consumption-layer annotations leaking into a ZI_* interface
+  // view. Only scanned when the code defines a ZI_* view; we strip ABAP-style
+  // line comments first (lines starting with `*` or text after `//`) so
+  // commented-out @UI examples don't false-positive.
+  const ifaceMatch = RX_DEFINE_INTERFACE_VIEW.exec(code);
+  if (ifaceMatch) {
+    out.interfaceStem = (ifaceMatch[1] ?? '').toUpperCase();
+    const stripped = stripCdsComments(code);
+    for (const m of stripped.matchAll(RX_ANY_ANNOTATION)) {
+      const ann = (m[0] ?? '').toLowerCase();
+      for (const forbidden of FORBIDDEN_INTERFACE_ANNOTATIONS) {
+        if (ann.startsWith(forbidden.prefix)) {
+          tally(out.interfaceAnn, forbidden.label);
+          break;
+        }
+      }
+    }
+  }
+
   return out;
+}
+
+/** Strip CDS / ABAP comments so commented-out annotations don't false-positive
+ *  the consumption-leakage scan. CDS uses both `//` line comments and
+ *  `/* ... *​/` block comments; ABAP-style `*` is at column 0. */
+function stripCdsComments(code: string): string {
+  return code
+    .split('\n')
+    .map(line => {
+      if (/^\s*\*/.test(line)) return '';
+      const slash = line.indexOf('//');
+      return slash >= 0 ? line.slice(0, slash) : line;
+    })
+    .join('\n')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +408,8 @@ export async function verifyGeneratedCode(
     refs.tables.size === 0 &&
     refs.bapis.size === 0 &&
     refs.uis.size === 0 &&
-    refs.exposeZi.size === 0;
+    refs.exposeZi.size === 0 &&
+    refs.interfaceAnn.size === 0;
 
   if (nothingFound) {
     return {
@@ -333,7 +431,7 @@ export async function verifyGeneratedCode(
     return {
       verdict:        'skipped',
       scannedAt,
-      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size,
+      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size,
       countsByLevel:  emptyCounts(),
       findings:       [],
       mcpUnavailable: true,
@@ -484,6 +582,30 @@ export async function verifyGeneratedCode(
       occurrences:  count,
       acknowledged: ackFor(zi)
     });
+  }
+
+  // ---- CPI-6 A2: consumption-layer annotations on a ZI_* interface view ---
+  // The interface layer must stay a pure projection. @UI / @Search /
+  // @ObjectModel.semanticKey / @Consumption belong on the ZC_* projection.
+  if (refs.interfaceStem) {
+    const zc = `ZC_${refs.interfaceStem}`;
+    const zi = `ZI_${refs.interfaceStem}`;
+    for (const [label, count] of refs.interfaceAnn.entries()) {
+      const reason =
+        FORBIDDEN_INTERFACE_ANNOTATIONS.find(f => f.label === label)?.reason ?? '';
+      findings.push({
+        category:     'ui',
+        reference:    `${zi}: ${label}`,
+        exists:       true,
+        level:        'B',
+        description:
+          `Interface view ${zi} carries ${label} annotation(s) — these belong on ` +
+          `the consumption layer. ${reason}`,
+        alternative:  `Move ${label} annotations from ${zi} to ${zc} (consumption view)`,
+        occurrences:  count,
+        acknowledged: ackFor(`${zi}: ${label}`)
+      });
+    }
   }
 
   // Aggregate counts and verdict — acknowledged findings are excluded so a
