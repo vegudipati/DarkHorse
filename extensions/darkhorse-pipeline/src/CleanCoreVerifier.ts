@@ -51,7 +51,7 @@ export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D';
 export type Verdict        = 'pass' | 'warn' | 'fail' | 'skipped';
 
 export interface CleanCoreFinding {
-  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf';
+  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf' | 'test';
   reference:    string;          // raw token found in the source
   exists:       boolean | null;  // null if the tool doesn't return existence
   level:        CleanCoreLevel | null;
@@ -233,6 +233,13 @@ interface ExtractedReferences {
   /** CPI-6 A4 HANA push-down findings. Key is a stable identifier; value is
    *  the occurrence count in the scanned code. */
   perf: Map<PerfFindingKey, number>;
+  /** CPI-6 A5 — true when the code is an ABAP class with 2+ method bodies but
+   *  no FOR TESTING block. The single boolean (not a map) is enough because
+   *  one missing-tests finding per file is plenty. */
+  missingTests: boolean;
+  /** Count of method bodies surfaced in the finding description so the
+   *  developer sees the impact size at a glance. */
+  methodCount: number;
 }
 
 function tally(map: Map<string, number>, key: string): void {
@@ -243,6 +250,13 @@ function tally(map: Map<string, number>, key: string): void {
 // (ZBP_I_<stem> DEFINITION) so the A3 finding can escalate when the auth
 // check sits inside what should be DCL-protected code.
 const RX_BEHAVIOR_IMPL = /\bCLASS\s+ZBP_I_[A-Z][A-Z0-9_]*\s+(?:DEFINITION|IMPLEMENTATION)\b/i;
+
+// CPI-6 A5 — recognise an ABAP class file that contains real method
+// implementations but no FOR TESTING class. Such a file ships without unit
+// coverage and is flagged as a 'test' Level B finding.
+const RX_CLASS_DEFINITION  = /\bCLASS\s+[A-Z_][A-Z0-9_]*\s+DEFINITION\b/gi;
+const RX_METHOD_BODY       = /\bMETHOD\s+[A-Z_][A-Z0-9_~]*\s*\.[\s\S]*?\bENDMETHOD\b/gi;
+const RX_FOR_TESTING_BLOCK = /\bCLASS\s+[A-Z_][A-Z0-9_]*\s+DEFINITION\s+(?:[^.]*\b)?FOR\s+TESTING\b/i;
 
 function extractReferences(code: string): ExtractedReferences {
   const out: ExtractedReferences = {
@@ -255,7 +269,9 @@ function extractReferences(code: string): ExtractedReferences {
     interfaceStem:  null,
     authChecks:     new Map<string, number>(),
     isBehaviorImpl: RX_BEHAVIOR_IMPL.test(code),
-    perf:           new Map<PerfFindingKey, number>()
+    perf:           new Map<PerfFindingKey, number>(),
+    missingTests:   false,
+    methodCount:    0
   };
 
   for (const m of code.matchAll(RX_USEREXIT)) {
@@ -300,6 +316,19 @@ function extractReferences(code: string): ExtractedReferences {
     }
   }
   if (nestedCount > 0) out.perf.set('NESTED_SELECT_LOOP', nestedCount);
+
+  // CPI-6 A5 — missing-test detection. The rule fires only when the file
+  // actually defines a non-test class (RX_CLASS_DEFINITION matches at least
+  // once for a non-test class) and contains 2+ ENDMETHOD bodies but zero
+  // FOR TESTING declarations. The 2+ threshold avoids flagging trivial
+  // adapter classes with a single passthrough method.
+  const classDefMatches = code.match(RX_CLASS_DEFINITION) ?? [];
+  const methodBodyCount = (code.match(RX_METHOD_BODY) ?? []).length;
+  const hasForTesting   = RX_FOR_TESTING_BLOCK.test(code);
+  if (classDefMatches.length > 0 && methodBodyCount >= 2 && !hasForTesting) {
+    out.missingTests = true;
+    out.methodCount  = methodBodyCount;
+  }
 
   // FROM-clause table extraction: skip anything that isn't a known SAP
   // standard table to avoid false positives on custom Z*/Y* tables and
@@ -488,7 +517,8 @@ export async function verifyGeneratedCode(
     refs.exposeZi.size === 0 &&
     refs.interfaceAnn.size === 0 &&
     refs.authChecks.size === 0 &&
-    refs.perf.size === 0;
+    refs.perf.size === 0 &&
+    !refs.missingTests;
 
   if (nothingFound) {
     return {
@@ -510,7 +540,7 @@ export async function verifyGeneratedCode(
     return {
       verdict:        'skipped',
       scannedAt,
-      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size + refs.perf.size,
+      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size + refs.perf.size + (refs.missingTests ? 1 : 0),
       countsByLevel:  emptyCounts(),
       findings:       [],
       mcpUnavailable: true,
@@ -689,6 +719,33 @@ export async function verifyGeneratedCode(
         `aspect pfcg_auth '${authObj}' ... ; }`,
       occurrences:  count,
       acknowledged: ackFor(`AUTHORITY-CHECK ${authObj}`)
+    });
+  }
+
+  // ---- CPI-6 A5: ABAP class without FOR TESTING ----------------------------
+  // Fires once per scan when the code is a class with substantive method
+  // bodies but no FOR TESTING block. Acknowledging this finding signals the
+  // developer is shipping tests in a separate transport / object.
+  if (refs.missingTests) {
+    findings.push({
+      category:     'test',
+      reference:    'CLAS without FOR TESTING',
+      exists:       true,
+      level:        'B',
+      description:
+        `This class implements ${refs.methodCount} method bodies but contains ` +
+        `no CLASS ... DEFINITION ... FOR TESTING block. Clean Core expects ` +
+        `every behavior class (especially ZBP_I_* and any class with business ` +
+        `logic) to ship with ABAP Unit coverage. Local FOR TESTING classes ` +
+        `inside the same include are the cheapest path and travel in the ` +
+        `same transport.`,
+      alternative:
+        `Append a local test class: CLASS ltcl_<name> DEFINITION FOR TESTING ` +
+        `RISK LEVEL HARMLESS DURATION SHORT. Use cl_cds_test_environment for ` +
+        `CDS doubles and cl_abap_unit_assert for assertions. At minimum one ` +
+        `test per validation, one per determination, one happy-path EML round-trip.`,
+      occurrences:  1,
+      acknowledged: ackFor('CLAS without FOR TESTING')
     });
   }
 

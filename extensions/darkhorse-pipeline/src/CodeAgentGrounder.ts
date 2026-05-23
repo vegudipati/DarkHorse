@@ -369,7 +369,46 @@ function detectLayerRoleGrounding(obj: AbapObject): GroundingItem | null {
         `  - Authorization: rely on the DCL role attached to ZI_${stem}. Do ` +
         `NOT emit classic AUTHORITY-CHECK statements here — they bypass the ` +
         `DCL contract and the post-generation Clean Core verifier will flag ` +
-        `them as a layering violation.`
+        `them as a layering violation.\n` +
+        `  - Tests: append a LOCAL test class ltcl_${stem.toLowerCase()} ` +
+        `DEFINITION FOR TESTING after the main implementation. Skeleton:\n\n` +
+        `      class ltcl_${stem.toLowerCase()} definition deferred.\n` +
+        `      class ${name} definition local friends ltcl_${stem.toLowerCase()}.\n\n` +
+        `      class ltcl_${stem.toLowerCase()} definition\n` +
+        `        for testing risk level harmless duration short final.\n` +
+        `        private section.\n` +
+        `          class-data: env type ref to if_cds_test_environment.\n` +
+        `          class-methods: class_setup, class_teardown.\n` +
+        `          methods: setup, teardown,\n` +
+        `                   validate_<rule>      for testing raising cx_static_check,\n` +
+        `                   determine_<field>    for testing raising cx_static_check.\n` +
+        `      endclass.\n\n` +
+        `    Implement at least one test per declared validation and one ` +
+        `per declared determination, asserting with cl_abap_unit_assert.`
+    };
+  }
+
+  if (type === 'CLAS' && /^(?:ZCL_TEST_|ZTCL_)[A-Z][A-Z0-9_]*$/.test(name)) {
+    // Strip whichever convention prefix is present.
+    const stem = name.replace(/^ZCL_TEST_/, '').replace(/^ZTCL_/, '');
+    return {
+      heading: 'Clean Core layer role: ABAP Unit Test Class',
+      tool:    'layer_role',
+      body:
+        `You are generating the global ABAP Unit test class ${name} for ` +
+        `entity ZI_${stem}. Required shape:\n\n` +
+        `  - CLASS ${name} DEFINITION PUBLIC FINAL\n` +
+        `    FOR TESTING RISK LEVEL HARMLESS DURATION SHORT\n` +
+        `    CREATE PUBLIC.\n` +
+        `  - Use cl_cds_test_environment=>create( i_for_entity = 'ZI_${stem}' ) ` +
+        `in CLASS_SETUP to spin up CDS doubles and tear down in CLASS_TEARDOWN.\n` +
+        `  - Use cl_abap_unit_assert=>assert_equals / =>assert_initial / ` +
+        `=>assert_bound / =>fail for assertions.\n` +
+        `  - Cover the behaviors declared in the BDEF: at minimum one test per ` +
+        `validation, one per determination, and one happy-path EML round-trip.\n` +
+        `  - Test method shape: METHODS <name> FOR TESTING RAISING cx_static_check.\n` +
+        `  - Do NOT make HTTP calls or call live SAP RFCs in tests — use the ` +
+        `CDS test double environment exclusively.`
     };
   }
 

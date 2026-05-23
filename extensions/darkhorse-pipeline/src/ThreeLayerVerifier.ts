@@ -37,7 +37,8 @@ export type LayerRole =
   | 'behaviorDef'       // BDEF for ZI_*
   | 'serviceDef'        // ZUI_*
   | 'serviceBinding'    // ZUI_*_O4
-  | 'dcl';              // DCLS access role for ZI_<stem>  (CPI-6 A3)
+  | 'dcl'               // DCLS access role for ZI_<stem>  (CPI-6 A3)
+  | 'test';             // ZCL_TEST_<stem> / ZTCL_<stem>   (CPI-6 A5)
 
 export interface MissingLayer {
   role:           LayerRole;
@@ -83,6 +84,9 @@ const RX_INTERFACE   = /^ZI_([A-Z][A-Z0-9_]*)$/i;
 const RX_CONSUMPTION = /^ZC_([A-Z][A-Z0-9_]*)$/i;
 /** Matches a behavior projection class, e.g. ZBP_I_OTC_ROUTING_DETAIL. */
 const RX_BEHAVIOR_P  = /^ZBP_I_([A-Z][A-Z0-9_]*)$/i;
+/** Matches a global test class — accepts the two common SAP conventions:
+ *  ZCL_TEST_<stem> and ZTCL_<stem>. CPI-6 A5. */
+const RX_TEST_CLASS  = /^(?:ZCL_TEST_|ZTCL_)([A-Z][A-Z0-9_]*)$/i;
 /** Matches a service definition, e.g. ZUI_OTC_ROUTING_DETAIL. */
 const RX_SERVICE_DEF = /^ZUI_([A-Z][A-Z0-9_]*)$/i;
 /** Matches a service binding, e.g. ZUI_OTC_ROUTING_DETAIL_O4. */
@@ -100,6 +104,7 @@ function extractEntity(
   if ((m = RX_SERVICE_BIND.exec(trimmed))) return { role: 'serviceBinding', entity: m[1]! };
   if ((m = RX_SERVICE_DEF.exec(trimmed)))  return { role: 'serviceDef',     entity: m[1]! };
   if ((m = RX_BEHAVIOR_P.exec(trimmed)))   return { role: 'behaviorProj',   entity: m[1]! };
+  if ((m = RX_TEST_CLASS.exec(trimmed)))   return { role: 'test',           entity: m[1]! };
   // DCL roles conventionally share the name of the interface view they
   // protect (define role ZI_<stem>). Disambiguate using the object type
   // BEFORE the bare interface-pattern check, otherwise every DCLS would be
@@ -221,6 +226,20 @@ function makeMissing(
           'The DCL role name conventionally matches the interface view name.',
         blocking: false
       };
+    case 'test':
+      return {
+        role, objectType: 'CLAS',
+        suggestedName: `ZCL_TEST_${entity}`,
+        rationale:
+          'Global ABAP Unit test class for the entity. Required for ' +
+          'transactional clusters so determinations, validations, and the ' +
+          'behavior pool implementation have coverage. Use ' +
+          'cl_cds_test_environment for CDS doubles and cl_abap_unit_assert ' +
+          'for assertions. Local FOR TESTING classes inside the behavior ' +
+          'pool satisfy the same Clean Core requirement and may be used ' +
+          'instead — acknowledge this finding if you go that route.',
+        blocking: false
+      };
   }
 }
 
@@ -283,7 +302,7 @@ export function verifyThreeLayer(objects: ReadonlyArray<AbapObject>): ThreeLayer
 
     const required: LayerRole[] = ['interface', 'consumption', 'serviceDef', 'serviceBinding', 'dcl'];
     if (c.transactional) {
-      required.push('behaviorDef', 'behaviorProj');
+      required.push('behaviorDef', 'behaviorProj', 'test');
     }
 
     for (const role of required) {
