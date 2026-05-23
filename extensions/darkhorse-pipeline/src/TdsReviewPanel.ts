@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { TdsDocument } from './DocxWriter';
 import { PipelineStateManager } from './PipelineStateManager';
 import { PipelineTracker } from './PipelineTracker';
-import { verifyThreeLayer, renderThreeLayerSummary } from './ThreeLayerVerifier';
+import { synthesizeMissingLayers } from './ThreeLayerVerifier';
 
 export class TdsReviewPanel {
 
@@ -98,28 +98,25 @@ export class TdsReviewPanel {
       }
     }
 
-    // CPI-6 A1 — three-layer Clean Core check. Runs against the FINAL (possibly
-    // developer-edited) abapObjectList. Surfaces missing ZI_/ZC_/ZUI_/ZUI_*_O4
-    // layers BEFORE code generation so the developer can either add the
-    // missing objects or acknowledge that this is an intentional partial
-    // delivery (e.g. read-only entity with a separate service in another TR).
+    // CPI-6 A1 + auto-fill — at approval time, synthesise any missing Clean
+    // Core three-layer objects so the developer never has to hand-edit the
+    // TDS. This catches the case where the TDS was generated BEFORE auto-
+    // fill landed in TdsGenerator (saved state from an earlier session) and
+    // the case where the developer manually removed required objects from
+    // the panel. The auto-fill is silent except for a brief toast listing
+    // what was added.
     const state = this.stateManager.getState();
     const abapObjects = state?.abapObjects ?? [];
-    const layerReport = verifyThreeLayer(abapObjects);
-    if (!layerReport.pass) {
-      const summary = renderThreeLayerSummary(layerReport);
-      const choice = await vscode.window.showWarningMessage(
-        `DarkHorse Clean Core: ${layerReport.totalMissing} missing layer(s) across ` +
-        `${layerReport.clusters.filter(c => c.missing.length > 0).length} entity cluster(s). ` +
-        `Continue without adding them, or go back and edit the TDS object list?`,
-        { modal: true, detail: summary },
-        'Continue Anyway',
-        'Edit TDS'
+    const autoFill = synthesizeMissingLayers(abapObjects);
+    if (autoFill.added.length > 0 && state) {
+      state.abapObjects = autoFill.filled;
+      await this.stateManager.setState(state);
+      const summary = autoFill.added
+        .map(a => `${a.object.objectType} ${a.object.objectName}`)
+        .join(', ');
+      vscode.window.showInformationMessage(
+        `DarkHorse: Auto-added ${autoFill.added.length} Clean Core layer object(s) at approval — ${summary}.`
       );
-      if (choice !== 'Continue Anyway') {
-        // Developer wants to edit. Leave the panel open, don't approve.
-        return;
-      }
     }
 
     await this.stateManager.markTdsApproved();
