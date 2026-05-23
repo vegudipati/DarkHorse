@@ -287,18 +287,21 @@ export function verifyThreeLayer(objects: ReadonlyArray<AbapObject>): ThreeLayer
     c.transactional = detectTransactional(c, all);
   }
 
-  // 4. Compute missing layers. The required set differs by cluster shape:
-  //    - Any cluster with EITHER interface, consumption, serviceDef, or
-  //      serviceBinding present is treated as "service-bearing" and needs
-  //      ZI_/ZC_/ZUI_/ZUI__O4 at minimum.
-  //    - Transactional clusters additionally need BDEF + ZBP_I_*.
+  // 4. Compute missing layers. Service intent is established by the presence
+  //    of a service definition (SRVD) or a service binding (SRVB). Bare
+  //    interface views (ZI_*) and bare consumption views (ZC_*) are valid
+  //    building blocks — they may be associated by another service-bearing
+  //    cluster, used internally by ABAP, or reserved for later promotion to
+  //    a service. We don't force them to have the full ZC/SRVD/SRVB/DCL set.
+  //
+  //    When SRVD or SRVB IS present, the full layer set is required:
+  //    interface, consumption, serviceDef, serviceBinding, dcl. Transactional
+  //    clusters also require behaviorDef, behaviorProj, and test.
   for (const c of clusters.values()) {
-    const isServiceBearing =
-      Boolean(c.present.interface) ||
-      Boolean(c.present.consumption) ||
+    const hasServiceIntent =
       Boolean(c.present.serviceDef) ||
       Boolean(c.present.serviceBinding);
-    if (!isServiceBearing) continue;
+    if (!hasServiceIntent) continue;
 
     const required: LayerRole[] = ['interface', 'consumption', 'serviceDef', 'serviceBinding', 'dcl'];
     if (c.transactional) {
