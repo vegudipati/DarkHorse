@@ -347,7 +347,7 @@ Return ONLY valid JSON. No markdown fences. No preamble. No explanation.`;
    * Flatten a TdsDocument into a string-only map for the template renderer.
    * Field names match the keys used in templates-config heading mappings.
    */
-  private static flattenForTemplate(tds: TdsDocument): Record<string, string> {
+  public static flattenForTemplate(tds: TdsDocument): Record<string, string> {
     const s: any = tds.sections ?? {};
     const renderObjects = (arr: any[] | undefined): string =>
       (arr ?? []).map((o, idx) => {

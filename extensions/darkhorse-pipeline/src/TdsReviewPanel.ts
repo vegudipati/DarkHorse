@@ -3,6 +3,7 @@ import { TdsDocument } from './DocxWriter';
 import { PipelineStateManager } from './PipelineStateManager';
 import { PipelineTracker } from './PipelineTracker';
 import { synthesizeMissingLayers } from './ThreeLayerVerifier';
+import { refreshTdsAndReport }      from './TdsRefresher';
 
 export class TdsReviewPanel {
 
@@ -120,6 +121,15 @@ export class TdsReviewPanel {
     }
 
     await this.stateManager.markTdsApproved();
+
+    // Re-render the TDS .docx + write the pipeline generation report so the
+    // approved object list (including any auto-fill additions) is reflected
+    // in the doc and the report. Best-effort.
+    try {
+      await refreshTdsAndReport(this.stateManager);
+    } catch (err: any) {
+      console.warn(`[DarkHorse] TdsRefresher invocation failed at approve: ${err?.message ?? err}`);
+    }
     this.tracker.refresh();
     this.panel.dispose();
 

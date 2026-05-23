@@ -391,6 +391,16 @@ export class ObjectCodeGenerator {
             }
           }
 
+          // Re-render the TDS .docx and rewrite the generation report so the
+          // doc reflects the freshly accepted object. Best-effort — refresh
+          // failures don't block the accept flow.
+          try {
+            const { refreshTdsAndReport } = require('./TdsRefresher');
+            await refreshTdsAndReport(stateManager);
+          } catch (err: any) {
+            console.warn(`[DarkHorse] TdsRefresher invocation failed: ${err?.message ?? err}`);
+          }
+
           resolve(true);
         } else if (message.command === 'reject') {
           resolved = true;
