@@ -101,6 +101,39 @@ export class ClaudeAdapter implements ILLMAdapter {
       ]
     };
 
+    // Retry policy — up to 3 attempts total with 1s, 3s backoff between them.
+    // Covers transient failures we see in corporate environments: fetch died
+    // mid-flight (ECONNRESET / ECONNREFUSED / ETIMEDOUT), 5xx from Anthropic,
+    // 529 overload. Auth (401) and rate-limit (429) and bad-input (4xx) are
+    // NOT retried — they will keep failing the same way.
+    const MAX_ATTEMPTS = 3;
+    const BACKOFF_MS   = [1_000, 3_000];   // length = MAX_ATTEMPTS - 1
+
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        return await this.attemptCallClaude(body);
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        lastError   = error;
+
+        if (!isRetryable(error) || attempt === MAX_ATTEMPTS) {
+          throw error;
+        }
+
+        const waitMs = BACKOFF_MS[attempt - 1] ?? 3_000;
+        process.stderr.write(
+          `[DarkHorse Proxy] Claude call attempt ${attempt}/${MAX_ATTEMPTS} failed (${error.message}). ` +
+          `Retrying in ${waitMs}ms.\n`
+        );
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+      }
+    }
+    // Unreachable, but TypeScript needs an explicit throw for typing.
+    throw lastError ?? new Error('Claude API call failed after retries.');
+  }
+
+  private async attemptCallClaude(body: object): Promise<GenerateResponse> {
     // AbortController for request timeout
     const controller = new AbortController();
     const timeoutId  = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -120,7 +153,7 @@ export class ClaudeAdapter implements ILLMAdapter {
     } catch (err: unknown) {
       clearTimeout(timeoutId);
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error('Claude API request timed out after 60 seconds.');
+        throw new Error(`Claude API request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds.`);
       }
       throw new Error(`Network error calling Claude API: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -135,6 +168,8 @@ export class ClaudeAdapter implements ILLMAdapter {
         throw new Error(`401 Unauthorized`);
       } else if (status === 429) {
         throw new Error(`429 Rate limit exceeded by Claude API. Try again shortly.`);
+      } else if (status === 529) {
+        throw new Error(`529 Claude API overloaded. Anthropic is rate-throttling.`);
       } else if (status >= 500) {
         throw new Error(`Claude API server error (${status}). Anthropic may be experiencing issues.`);
       } else {
@@ -161,6 +196,39 @@ export class ClaudeAdapter implements ILLMAdapter {
       tokensUsed: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0)
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Retry classification — returns true for errors that are likely transient.
+// Keep this conservative: we never retry auth, rate-limit, or programmer-error
+// cases because those will fail the same way next time and waste cost.
+// ---------------------------------------------------------------------------
+
+function isRetryable(err: Error): boolean {
+  const m = err.message.toLowerCase();
+
+  // Network-layer failures (fetch died, TCP / TLS issues, DNS hiccups)
+  if (m.includes('network error calling claude api')) return true;
+  if (m.includes('econnreset'))     return true;
+  if (m.includes('econnrefused'))   return true;
+  if (m.includes('etimedout'))      return true;
+  if (m.includes('eai_again'))      return true;
+  if (m.includes('socket hang up')) return true;
+
+  // Our own timeout wrapper
+  if (m.includes('timed out after')) return true;
+
+  // Anthropic transient HTTP codes
+  if (m.includes('server error (500')) return true;
+  if (m.includes('server error (502')) return true;
+  if (m.includes('server error (503')) return true;
+  if (m.includes('server error (504')) return true;
+  if (m.includes('529 claude api overloaded')) return true;
+
+  // 401 / 429 / 4xx (except 408/429 — but we deliberately skip even 429 since
+  // Anthropic asks callers to back off, and the safer default is to surface
+  // the error so the developer adjusts behaviour rather than burning quota).
+  return false;
 }
 
 // ---------------------------------------------------------------------------

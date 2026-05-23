@@ -22,5 +22,6 @@ export declare class ClaudeAdapter implements ILLMAdapter {
     explainCode(code: string): Promise<GenerateResponse>;
     private buildGenerateUserMessage;
     private callClaude;
+    private attemptCallClaude;
 }
 //# sourceMappingURL=ClaudeAdapter.d.ts.map

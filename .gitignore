@@ -26,3 +26,4 @@ Thumbs.db
 # DarkHorse pipeline artefacts — generated .abap files, .docx FDS/TDS exports,
 # and the corrections/ folder. These are per-run outputs, not source code.
 output/
+GIT-IGNORE - Templates and Standards/
