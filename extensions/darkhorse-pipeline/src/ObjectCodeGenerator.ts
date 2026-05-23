@@ -354,24 +354,34 @@ export class ObjectCodeGenerator {
 
           panel.dispose();
 
-          // Save to .abap file and offer Git commit
+          // CPI-6 A7 — save in abapGit layout. The output folder becomes a
+          // valid abapGit repo (.abapgit.xml + src/package.devc.xml + per-
+          // object files using the correct .<type>.<ext> naming) so the
+          // developer can cloneTo from ADT directly.
           const config = vscode.workspace.getConfiguration();
           const outputFolder = config.get<string>('darkhorse.pipeline.outputFolder', '');
           if (outputFolder) {
             try {
-              const { PipelineGitHelper } = require('./PipelineGitHelper');
-              const filePath = await PipelineGitHelper.saveCodeToFile(
-                obj.objectName,
-                obj.objectType,
-                currentCode,
-                outputFolder
-              );
+              const { saveAbapGit } = require('./AbapGitWriter');
+              const packageName = config.get<string>('darkhorse.pipeline.defaultPackage', '') || '$TMP';
+              const writeResult = saveAbapGit({
+                objectName:   obj.objectName,
+                objectType:   obj.objectType,
+                description:  obj.description ?? obj.objectName,
+                code:         currentCode,
+                outputFolder,
+                packageName
+              });
+              const primaryPath = writeResult.sourcePath ?? writeResult.metadataPath ?? outputFolder;
               vscode.window.showInformationMessage(
-                `DarkHorse: ${obj.objectName} ✓ Saved to ${filePath}`
+                `DarkHorse: ${obj.objectName} ✓ Saved (abapGit layout) to ${primaryPath}`
               );
               setTimeout(async () => {
                 try {
-                  await PipelineGitHelper.commitCode(filePath, obj.objectName, stateManager);
+                  if (primaryPath) {
+                    const { PipelineGitHelper } = require('./PipelineGitHelper');
+                    await PipelineGitHelper.commitCode(primaryPath, obj.objectName, stateManager);
+                  }
                 } catch { }
               }, 1000);
             } catch {
