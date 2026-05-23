@@ -60,14 +60,16 @@ export function renderIntoTemplate(input: RenderInput): RenderResult {
 
   const templateBuf = fs.readFileSync(input.template.templatePath);
   const zip = new PizZip(templateBuf);
-  const docXml = zip.file('word/document.xml')?.asText();
+  let docXml = zip.file('word/document.xml')?.asText();
   if (!docXml) {
     throw new Error(`Template ${input.template.templatePath} has no word/document.xml.`);
   }
+  // Drop UTF-8 BOM + leading whitespace before <?xml ...?> — @xmldom/xmldom 0.9.x is strict.
+  if (docXml.charCodeAt(0) === 0xFEFF) docXml = docXml.slice(1);
+  docXml = docXml.replace(/^\s+/, '');
 
-  const dom = new DOMParser({
-    errorHandler: { warning: () => {}, error: () => {}, fatalError: () => {} }
-  }).parseFromString(docXml, 'application/xml');
+  const dom = new DOMParser({ onError: () => { /* swallow */ } })
+    .parseFromString(docXml, 'application/xml');
 
   // Walk paragraphs sequentially. When we encounter a heading that maps to a
   // field, replace the *next* paragraph's text content.

@@ -140,18 +140,46 @@ export function resolveTemplate(
   kind: TemplateKind
 ): TemplateEntry | null {
   const config = loadTemplatesConfig();
-  if (!config) return null;
+  if (!config) {
+    console.log(`[DarkHorse] resolveTemplate(${ricefwType}, ${kind}) -> no templatesConfig loaded (setting empty or file missing)`);
+    return null;
+  }
 
-  // Case-insensitive RICEFW match — keys are commonly "Report" / "Enhancement"
-  // / etc., but the BR field can be "Reports" or "REPORT". Match the prefix.
-  const ricefwKey = Object.keys(config.templates).find(k =>
-    ricefwType.trim().toLowerCase().startsWith(k.trim().toLowerCase())
-  );
-  if (!ricefwKey) return null;
+  // Case-insensitive RICEFW match. Accept both directions of prefix match so
+  // "Report" key works against state ricefwType "Reports", AND "Reports" key
+  // works against state ricefwType "Report". Also accept exact match without
+  // prefix to be safe.
+  const wanted = ricefwType.trim().toLowerCase();
+  const ricefwKey = Object.keys(config.templates).find(k => {
+    const key = k.trim().toLowerCase();
+    return key === wanted
+        || wanted.startsWith(key)
+        || key.startsWith(wanted);
+  });
+  if (!ricefwKey) {
+    console.log(
+      `[DarkHorse] resolveTemplate(${ricefwType}, ${kind}) -> no matching key in templatesConfig. ` +
+      `Available keys: ${Object.keys(config.templates).join(', ')}`
+    );
+    return null;
+  }
 
   const entry = config.templates[ricefwKey];
-  if (!entry) return null;
-  return entry[kind] ?? null;
+  if (!entry) {
+    console.log(`[DarkHorse] resolveTemplate(${ricefwType}, ${kind}) -> ricefw key "${ricefwKey}" present but empty`);
+    return null;
+  }
+  const tpl = entry[kind];
+  if (!tpl) {
+    console.log(`[DarkHorse] resolveTemplate(${ricefwType}, ${kind}) -> ricefw key "${ricefwKey}" has no "${kind}" entry`);
+    return null;
+  }
+  if (!tpl.templatePath || !require('fs').existsSync(tpl.templatePath)) {
+    console.log(`[DarkHorse] resolveTemplate(${ricefwType}, ${kind}) -> templatePath missing on disk: ${tpl.templatePath}`);
+    return null;
+  }
+  console.log(`[DarkHorse] resolveTemplate(${ricefwType}, ${kind}) -> ${tpl.templatePath}`);
+  return tpl;
 }
 
 // ---------------------------------------------------------------------------

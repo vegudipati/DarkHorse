@@ -27,6 +27,7 @@ import {
 import { recordGeneration }       from './UidLogger';
 import { applyHeader }            from './HeaderEmitter';
 import { renderStandardsForPrompt } from './StandardsLoader';
+import { generateZWrapper }       from './ZWrapperGenerator';
 import * as crypto                from 'crypto';
 
 export class ObjectCodeGenerator {
@@ -364,6 +365,66 @@ export class ObjectCodeGenerator {
           resolved = true;
           panel.dispose();
           resolve(false);
+        } else if (message.command === 'generateZWrapper') {
+          // One-click Z wrapper action. Generates the Z CDS view file
+          // alongside the consuming program, rewrites the FROM clause, and
+          // re-runs the verifier + reviewer on the corrected code.
+          const table = String(message.table ?? '').trim();
+          if (!table) return;
+
+          const outputFolder = vscode.workspace.getConfiguration()
+            .get<string>('darkhorse.pipeline.outputFolder', '');
+          if (!outputFolder) {
+            vscode.window.showErrorMessage(
+              'DarkHorse: Output folder not configured — cannot save the Z wrapper view.'
+            );
+            return;
+          }
+
+          const pipelineTitle = stateManager.getState()?.title ?? 'DarkHorse Pipeline';
+
+          try {
+            const result = await generateZWrapper({
+              tableName:     table,
+              code:          currentCode,
+              obj,
+              outputFolder,
+              pipelineTitle,
+              mcpPort:       resolveMcpPort(),
+              model:         'darkhorse-zwrapper-deterministic'
+            });
+
+            // Save the new code to file + state if the original was already
+            // accepted. For the in-progress preview we just refresh the panel.
+            currentCode = result.rewrittenCode;
+
+            // Re-run verifier + reviewer on the rewritten code so the panel
+            // reflects the corrected state.
+            const proxyPort = vscode.workspace.getConfiguration()
+              .get<number>('darkhorse.pipeline.llmProxyPort', 47291);
+            const [vRes, rRes] = await Promise.allSettled([
+              verifyGeneratedCode(currentCode, resolveMcpPort(), Array.from(stickyAcks)),
+              reviewGeneratedCode(obj, currentCode, proxyPort)
+            ]);
+            if (vRes.status === 'fulfilled') currentReport = vRes.value;
+            if (rRes.status === 'fulfilled') currentReview = rRes.value;
+
+            panel.webview.html = ObjectCodeGenerator.getPreviewHtml(
+              obj, currentCode, currentReport, currentReview, currentAutoFix
+            );
+
+            const fieldsBlurb = result.fieldsUsed.length > 0
+              ? `with fields ${result.fieldsUsed.slice(0, 6).join(', ')}${result.fieldsUsed.length > 6 ? '...' : ''}`
+              : 'with placeholder fields (review the generated DDL)';
+            vscode.window.showInformationMessage(
+              `DarkHorse: Generated ${result.zViewName} ${fieldsBlurb}. ${result.rewriteCount} FROM ${table} → FROM ${result.zViewName} rewrites applied. Z view saved to ${result.zViewPath}.`
+            );
+          } catch (err: any) {
+            console.error('DarkHorse: generateZWrapper failed', err);
+            vscode.window.showErrorMessage(
+              `DarkHorse: Generate Z Wrapper failed — ${err?.message ?? err}`
+            );
+          }
         } else if (message.command === 'regenerate') {
           // Developer acknowledged one or more findings and wants a fresh
           // generation. We merge into a sticky set so prior acknowledgements
@@ -702,6 +763,13 @@ Inline comments inside the BODY of the code remain REQUIRED — explain non-obvi
                      <span>Acknowledge as valid</span>
                    </label>
                  </td>`;
+               } else if (f.category === 'table' && f.level === 'C') {
+                 // Level C table finding — offer one-click Z wrapper generation
+                 actionCell = `<td class="cc-action-col">
+                   <button class="cc-zwrap-btn" data-table="${refEsc}" onclick="ccGenerateZWrapper(this)">
+                     🔧 Generate Z Wrapper
+                   </button>
+                 </td>`;
                }
                return `<tr class="${rowClass}">
                  <td><span class="cc-lvl ${lvlClass}">${lvl}</span></td>
@@ -1032,6 +1100,13 @@ Inline comments inside the BODY of the code remain REQUIRED — explain non-obvi
     }
     .cc-regen-btn:hover:not(:disabled) { background: #388bfd; }
     .cc-regen-btn:disabled { background: #30363d; color: #6e7681; cursor: not-allowed; }
+    .cc-zwrap-btn {
+      padding: 4px 10px; border-radius: 4px; border: none;
+      background: #d29922; color: #0d1117; font-size: 11px; font-weight: 700;
+      cursor: pointer; white-space: nowrap;
+    }
+    .cc-zwrap-btn:hover { background: #e3b341; }
+    .cc-zwrap-btn:disabled { background: #30363d; color: #6e7681; cursor: not-allowed; }
     /* Review Agent panel (CPI-6 Sprint 6) */
     .rv-report {
       margin: 0 24px 16px;
@@ -1163,6 +1238,14 @@ Inline comments inside the BODY of the code remain REQUIRED — explain non-obvi
         .filter(Boolean);
       if (acks.length === 0) return;
       vscode.postMessage({ command: 'regenerate', acknowledgements: acks });
+    }
+
+    function ccGenerateZWrapper(btn) {
+      const table = btn.getAttribute('data-table');
+      if (!table) return;
+      btn.disabled = true;
+      btn.textContent = 'Working...';
+      vscode.postMessage({ command: 'generateZWrapper', table: table });
     }
   </script>
 </body>

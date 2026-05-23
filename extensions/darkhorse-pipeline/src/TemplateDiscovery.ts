@@ -106,13 +106,16 @@ export function extractHeadings(docxPath: string): DiscoveredHeading[] {
   const PizZip = require('pizzip');
   const buf    = fs.readFileSync(docxPath);
   const zip    = new PizZip(buf);
-  const docXml = zip.file('word/document.xml')?.asText();
+  let docXml   = zip.file('word/document.xml')?.asText();
   if (!docXml) {
     throw new Error(`Template ${docxPath} has no word/document.xml — not a valid docx.`);
   }
+  // @xmldom/xmldom 0.9.x is strict: any byte before the <?xml ...?> declaration
+  // throws. Word writes a UTF-8 BOM and occasionally leading whitespace.
+  docXml = stripXmlPrologueNoise(docXml);
 
   const { DOMParser } = require('@xmldom/xmldom');
-  const dom = new DOMParser({ errorHandler: { warning: () => {}, error: () => {}, fatalError: () => {} } })
+  const dom = new DOMParser({ onError: () => { /* swallow */ } })
     .parseFromString(docXml, 'application/xml');
 
   const paragraphs = dom.getElementsByTagName('w:p');
@@ -140,6 +143,13 @@ export function extractHeadings(docxPath: string): DiscoveredHeading[] {
     results.push({ level, text, order: i });
   }
   return results;
+}
+
+function stripXmlPrologueNoise(xml: string): string {
+  // Drop UTF-8 BOM if present.
+  if (xml.charCodeAt(0) === 0xFEFF) xml = xml.slice(1);
+  // Drop any leading whitespace before the XML declaration.
+  return xml.replace(/^\s+/, '');
 }
 
 // ---------------------------------------------------------------------------

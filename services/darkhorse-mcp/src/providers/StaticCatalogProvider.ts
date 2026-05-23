@@ -348,7 +348,13 @@ function applyHeuristic(
   // to read the table, the agent should use the released CDS view instead.)
   if (upperType === 'TABL') {
     return { ...base, level: 'C',
-      reasoning: 'SAP standard database table. The table itself is part of standard SAP, but direct SELECT bypasses the released-API contract — that act is Level C. Replace with the released CDS interface view (I_*) when one exists. Look it up in the SAP Business Accelerator Hub.',
+      reasoning:
+        `${upperName} is a standard SAP table — the TABLE itself is Clean Core (Level B as a SAP-released object). ` +
+        `What gets flagged here is the ACTION of a direct SELECT ${upperName.toLowerCase()} bypassing the released-API contract, ` +
+        `which is Level C. Two fixes: (1) replace the SELECT with the released I_* CDS interface view from the SAP Business ` +
+        `Accelerator Hub if one exists; (2) if no released view exists, ask the TDS Agent to include a Z wrapper view ` +
+        `(ZI_${upperName}) as a separate DDLS object and SELECT from that. The auto-fix step rewrites the FROM clause when the ` +
+        `verifier finding carries a CDS alternative.`,
       confidence: 'medium' };
   }
 
