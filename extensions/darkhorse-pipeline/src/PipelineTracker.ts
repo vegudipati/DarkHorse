@@ -1,17 +1,26 @@
 import * as vscode from 'vscode';
-import { PipelineStateManager, PipelineStage, CleanCoreLevel } from './PipelineStateManager';
+import { PipelineStateManager, PipelineStage, PipelineState } from './PipelineStateManager';
+
+type ItemStatus = 'complete' | 'active' | 'pending' | 'info' | 'blocked' | 'warning';
 
 class PipelineItem extends vscode.TreeItem {
+  /** Pipeline root items carry the pipelineId so getChildren can route the
+   *  request to the correct pipeline state. Stage items leave this undefined. */
+  public readonly pipelineId?: string;
+
   constructor(
     label: string,
-    status: 'complete' | 'active' | 'pending' | 'info' | 'blocked' | 'warning',
+    status: ItemStatus,
     description?: string,
-    command?: vscode.Command
+    command?: vscode.Command,
+    collapsibleState: vscode.TreeItemCollapsibleState = vscode.TreeItemCollapsibleState.None,
+    pipelineId?: string
   ) {
-    super(label, vscode.TreeItemCollapsibleState.None);
+    super(label, collapsibleState);
     this.description = description ?? '';
     this.command = command;
     this.iconPath = this.getIcon(status);
+    this.pipelineId = pipelineId;
   }
 
   private getIcon(status: string): vscode.ThemeIcon {
@@ -42,10 +51,16 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
     return element;
   }
 
-  getChildren(): PipelineItem[] {
-    const state = this.stateManager.getState();
-
-    if (!state) {
+  getChildren(element?: PipelineItem): PipelineItem[] {
+    // Pipeline-root expanded -> return its stage items.
+    if (element && element.pipelineId) {
+      const state = this.stateManager.getPipelineState(element.pipelineId);
+      if (!state) return [];
+      return this.getStageItems(state);
+    }
+    // Root level -> list every pipeline as a collapsible parent.
+    const pipelines = this.stateManager.listPipelines();
+    if (pipelines.length === 0) {
       return [
         new PipelineItem('No active pipeline', 'info', 'Run: DarkHorse: Start Pipeline'),
         new PipelineItem('Load Reference Docs', 'info', 'Optional but recommended', {
@@ -54,11 +69,62 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
       ];
     }
 
+    return pipelines.map(p => {
+      const state = this.stateManager.getPipelineState(p.pipelineId);
+      // The root status reflects the pipeline's current stage.
+      const stageStatus: ItemStatus =
+        p.currentStage === 'blocked_level_d' ? 'blocked'
+        : p.currentStage === 'complete'      ? 'complete'
+        : p.isActive                          ? 'active'
+        : 'pending';
+      // Active pipeline gets expanded by default so the developer sees its
+      // stages immediately; other pipelines collapse to keep the panel compact.
+      const collapse = p.isActive
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.Collapsed;
+      const label = `${p.isActive ? '▶ ' : ''}${p.title}`;
+      const description = state ? this.shortStageLabel(state) : p.currentStage;
+      // Clicking a non-active root switches to that pipeline. Active root's
+      // command is a no-op so it doesn't re-switch to itself.
+      const command: vscode.Command | undefined = p.isActive
+        ? undefined
+        : {
+            command:   'darkhorse.pipeline.switchPipeline',
+            title:     'Switch Pipeline',
+            arguments: [p.pipelineId]
+          };
+      return new PipelineItem(
+        label,
+        stageStatus,
+        description,
+        command,
+        collapse,
+        p.pipelineId
+      );
+    });
+  }
+
+  /** Compact one-line status label for the pipeline root row. */
+  private shortStageLabel(state: PipelineState): string {
+    const stage = state.currentStage;
+    if (stage === 'complete')        return `complete · ${state.abapObjects.filter(o => o.codeAccepted).length}/${state.abapObjects.length} accepted`;
+    if (stage === 'blocked_level_d') return '🚫 blocked (Level D)';
+    if (stage === 'code_generating') return `code (${state.currentObjectIndex}/${state.abapObjects.length})`;
+    return stage.replace(/_/g, ' ');
+  }
+
+  /** Build the per-stage rows for a single pipeline. Used both as the active
+   *  pipeline's expansion AND as any pipeline's children when expanded. */
+  private getStageItems(state: PipelineState): PipelineItem[] {
     const stage = state.currentStage;
     const items: PipelineItem[] = [];
 
-    // Pipeline title
-    items.push(new PipelineItem(`📋 ${state.title}`, 'info', state.ricefwType));
+    // RICEFW type / pipeline id badge row (always at the top of the expansion).
+    items.push(new PipelineItem(
+      `${state.ricefwType}`,
+      'info',
+      `id ${(state.pipelineId ?? '').slice(0, 4)} · started ${state.startedAt.split('T')[0]}`
+    ));
 
     // Blocked banner
     if (stage === 'blocked_level_d') {
@@ -82,7 +148,7 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
     ));
 
     // BR
-    const brStatus = stage === 'br_captured' ? 'active'
+    const brStatus: ItemStatus = stage === 'br_captured' ? 'active'
       : this.isAfter(stage, 'br_captured') ? 'complete' : 'pending';
     items.push(new PipelineItem(
       'Business Requirement',
@@ -92,7 +158,7 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
     ));
 
     // Solution Overview
-    const soStatus = stage === 'solution_overview_review' ? 'active'
+    const soStatus: ItemStatus = stage === 'solution_overview_review' ? 'active'
       : stage === 'solution_overview_generating' ? 'active'
       : this.isAfter(stage, 'solution_overview_approved') ? 'complete'
       : stage === 'solution_overview_approved' ? 'complete'
@@ -112,7 +178,7 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
     ));
 
     // FDS
-    const fdsStatus = stage === 'fds_review' ? 'active'
+    const fdsStatus: ItemStatus = stage === 'fds_review' ? 'active'
       : this.isAfter(stage, 'fds_approved') || stage === 'fds_approved' ? 'complete' : 'pending';
     items.push(new PipelineItem(
       'Functional Design Spec',
@@ -126,7 +192,7 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
     ));
 
     // TDS
-    const tdsStatus = stage === 'tds_review' ? 'active'
+    const tdsStatus: ItemStatus = stage === 'tds_review' ? 'active'
       : this.isAfter(stage, 'tds_approved') || stage === 'tds_approved' ? 'complete' : 'pending';
     items.push(new PipelineItem(
       'Technical Design Spec',
@@ -142,7 +208,7 @@ export class PipelineTracker implements vscode.TreeDataProvider<PipelineItem> {
     // Code objects
     if (state.abapObjects.length > 0) {
       state.abapObjects.forEach((obj, idx) => {
-        const objStatus = obj.codeAccepted ? 'complete'
+        const objStatus: ItemStatus = obj.codeAccepted ? 'complete'
           : idx === state.currentObjectIndex ? 'active' : 'pending';
         items.push(new PipelineItem(
           `  ${obj.sequence}. ${obj.objectName}`,

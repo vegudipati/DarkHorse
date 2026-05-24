@@ -68,7 +68,21 @@ export function activate(context: vscode.ExtensionContext) {
   // Multi-pipeline — switch between concurrent pipelines via QuickPick.
   // The status bar item invokes this command on click.
   context.subscriptions.push(
-    vscode.commands.registerCommand('darkhorse.pipeline.switchPipeline', async () => {
+    vscode.commands.registerCommand('darkhorse.pipeline.switchPipeline', async (pipelineIdArg?: string) => {
+      // When called from a tree-item click, the pipelineId is passed
+      // directly — no QuickPick needed. When called from the palette or
+      // status bar, no arg is supplied and we prompt.
+      if (pipelineIdArg) {
+        const ok = await stateManager.switchPipeline(pipelineIdArg);
+        if (ok) {
+          tracker.refresh();
+          const newActive = stateManager.getState();
+          vscode.window.showInformationMessage(
+            `DarkHorse: switched to "${newActive?.title ?? '(unknown)'}"`
+          );
+        }
+        return;
+      }
       const pipelines = stateManager.listPipelines();
       if (pipelines.length === 0) {
         vscode.window.showInformationMessage(
@@ -82,7 +96,8 @@ export function activate(context: vscode.ExtensionContext) {
         );
         return;
       }
-      const items = pipelines.map(p => ({
+      type SwitchItem = vscode.QuickPickItem & { pipelineId: string };
+      const items: SwitchItem[] = pipelines.map(p => ({
         label:       `${p.isActive ? '$(check) ' : '   '}${p.title}`,
         description: p.ricefwType,
         detail:      `${p.currentStage} · last update ${p.lastUpdatedAt.split('T')[0]} · id ${p.pipelineId.slice(0, 4)}`,

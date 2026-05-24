@@ -194,6 +194,13 @@ export class PipelineStateManager {
     return this.context.globalState.get<string>(ACTIVE_KEY);
   }
 
+  /** Returns the full PipelineState for an arbitrary pipelineId — used by
+   *  the tracker to render every pipeline (not just the active one). */
+  public getPipelineState(pipelineId: string): PipelineState | undefined {
+    this.migrateLegacyOnce();
+    return this.allStates()[pipelineId];
+  }
+
   public async switchPipeline(pipelineId: string): Promise<boolean> {
     this.migrateLegacyOnce();
     const map = this.allStates();
