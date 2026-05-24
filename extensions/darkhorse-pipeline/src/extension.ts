@@ -4,6 +4,29 @@ import { PipelineStateManager } from './PipelineStateManager';
 
 let tracker: PipelineTracker;
 let stateManager: PipelineStateManager;
+let statusBarItem: vscode.StatusBarItem;
+
+/** Refresh the multi-pipeline status bar item (active pipeline name + stage).
+ *  Called after any state change so the bar reflects reality. */
+function refreshStatusBar(): void {
+  const state = stateManager.getState();
+  if (!state) {
+    statusBarItem.text  = '$(circuit-board) DarkHorse: no pipeline';
+    statusBarItem.tooltip = 'Click to start a new pipeline.';
+    statusBarItem.command = 'darkhorse.pipeline.start';
+    statusBarItem.show();
+    return;
+  }
+  const count = stateManager.listPipelines().length;
+  const suffix = count > 1 ? ` (1 of ${count})` : '';
+  statusBarItem.text  = `$(circuit-board) ${state.title}${suffix}`;
+  statusBarItem.tooltip =
+    `Active pipeline: ${state.title}\n` +
+    `Stage: ${stateManager.getStageSummary()}\n` +
+    `Click to switch between ${count} pipeline(s).`;
+  statusBarItem.command = 'darkhorse.pipeline.switchPipeline';
+  statusBarItem.show();
+}
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -13,6 +36,18 @@ export function activate(context: vscode.ExtensionContext) {
   // Initialize pipeline tracker sidebar
   tracker = new PipelineTracker(stateManager);
   vscode.window.registerTreeDataProvider('darkhorse.pipelineTracker', tracker);
+
+  // Multi-pipeline status bar — shows active pipeline + total count.
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  context.subscriptions.push(statusBarItem);
+
+  // Wrap tracker.refresh so the status bar updates in lockstep.
+  const originalRefresh = tracker.refresh.bind(tracker);
+  tracker.refresh = () => {
+    originalRefresh();
+    refreshStatusBar();
+  };
+  refreshStatusBar();
 
   // Command: Start new pipeline
   context.subscriptions.push(
@@ -27,6 +62,81 @@ export function activate(context: vscode.ExtensionContext) {
       await stateManager.resetCodeGeneration();
       tracker.refresh();
       vscode.window.showInformationMessage('DarkHorse: Code generation reset. Use Resume Pipeline to retry.');
+    })
+  );
+
+  // Multi-pipeline — switch between concurrent pipelines via QuickPick.
+  // The status bar item invokes this command on click.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.switchPipeline', async () => {
+      const pipelines = stateManager.listPipelines();
+      if (pipelines.length === 0) {
+        vscode.window.showInformationMessage(
+          'DarkHorse: No pipelines yet. Use "Start Pipeline" to create one.'
+        );
+        return;
+      }
+      if (pipelines.length === 1) {
+        vscode.window.showInformationMessage(
+          `DarkHorse: Only one pipeline exists (${pipelines[0]!.title}). Use "Start Pipeline" to add another.`
+        );
+        return;
+      }
+      const items = pipelines.map(p => ({
+        label:       `${p.isActive ? '$(check) ' : '   '}${p.title}`,
+        description: p.ricefwType,
+        detail:      `${p.currentStage} · last update ${p.lastUpdatedAt.split('T')[0]} · id ${p.pipelineId.slice(0, 4)}`,
+        pipelineId:  p.pipelineId
+      }));
+      const pick = await vscode.window.showQuickPick(items, {
+        title:       'DarkHorse: switch pipeline',
+        placeHolder: 'Pick the pipeline you want active',
+        matchOnDescription: true,
+        matchOnDetail:      true
+      });
+      if (!pick) return;
+      const ok = await stateManager.switchPipeline(pick.pipelineId);
+      if (ok) {
+        tracker.refresh();
+        const newActive = stateManager.getState();
+        vscode.window.showInformationMessage(
+          `DarkHorse: switched to "${newActive?.title ?? '(unknown)'}"`
+        );
+      }
+    })
+  );
+
+  // Multi-pipeline — delete a pipeline (the active one or any other) with
+  // explicit confirmation. Output files on disk are NOT deleted; only the
+  // in-extension state.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.deletePipeline', async () => {
+      const pipelines = stateManager.listPipelines();
+      if (pipelines.length === 0) {
+        vscode.window.showInformationMessage('DarkHorse: No pipelines to delete.');
+        return;
+      }
+      const items = pipelines.map(p => ({
+        label:       `${p.isActive ? '$(check) ' : '   '}${p.title}`,
+        description: p.ricefwType,
+        detail:      `${p.currentStage} · id ${p.pipelineId.slice(0, 4)}`,
+        pipelineId:  p.pipelineId,
+        title:       p.title
+      }));
+      const pick = await vscode.window.showQuickPick(items, {
+        title:       'DarkHorse: delete pipeline',
+        placeHolder: 'Pick the pipeline to remove from extension state'
+      });
+      if (!pick) return;
+      const confirm = await vscode.window.showWarningMessage(
+        `Remove pipeline "${pick.title}" from DarkHorse?`,
+        { modal: true, detail: 'Output files on disk are NOT deleted — only the pipeline state inside the extension.' },
+        'Delete'
+      );
+      if (confirm !== 'Delete') return;
+      await stateManager.deletePipeline(pick.pipelineId);
+      tracker.refresh();
+      vscode.window.showInformationMessage(`DarkHorse: deleted pipeline "${pick.title}".`);
     })
   );
 

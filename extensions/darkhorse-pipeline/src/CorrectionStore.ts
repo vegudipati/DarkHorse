@@ -387,8 +387,9 @@ export async function runCaptureCorrectionsCommand(
   stateManager: PipelineStateManager
 ): Promise<void> {
 
-  const outputFolder = vscode.workspace.getConfiguration()
-    .get<string>('darkhorse.pipeline.outputFolder', '');
+  // Per-pipeline output subfolder — corrections live next to the abapGit
+  // src/ tree so each pipeline keeps its own correction history.
+  const outputFolder = stateManager.getPipelineOutputFolder();
   if (!outputFolder) {
     vscode.window.showErrorMessage(
       'DarkHorse: Output folder not configured. Set darkhorse.pipeline.outputFolder first.'

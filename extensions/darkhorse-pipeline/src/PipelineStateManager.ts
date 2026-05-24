@@ -62,6 +62,10 @@ export interface AbapObject {
 }
 
 export interface PipelineState {
+  /** Stable identifier for this pipeline. Generated on initPipeline.
+   *  Used to disambiguate output subfolders and identify pipelines
+   *  in the Switch / Delete UIs. */
+  pipelineId: string;
   title: string;
   ricefwType: string;
   objectType: string;
@@ -88,24 +92,151 @@ export interface PipelineState {
   styleContext?: string;
 }
 
-const STATE_KEY  = 'darkhorse.pipeline.state';
-const STYLE_KEY  = 'darkhorse.pipeline.styleContext';
+/** Legacy single-state key — read once at startup for migration into the
+ *  multi-pipeline map. Never written after the migration. */
+const STATE_KEY_LEGACY = 'darkhorse.pipeline.state';
+
+/** Current multi-pipeline storage: Record<pipelineId, PipelineState>. */
+const STATES_KEY  = 'darkhorse.pipeline.allStates';
+
+/** Active pipeline id (string). Undefined when no pipelines exist. */
+const ACTIVE_KEY  = 'darkhorse.pipeline.activePipelineId';
+
+const STYLE_KEY   = 'darkhorse.pipeline.styleContext';
+
+/** Compact identifier shared with UidLogger style: 16 hex chars from crypto. */
+function generatePipelineId(): string {
+  const crypto = require('crypto');
+  return crypto.randomBytes(8).toString('hex');
+}
+
+export interface PipelineSummary {
+  pipelineId:    string;
+  title:         string;
+  ricefwType:    string;
+  currentStage:  PipelineStage;
+  startedAt:     string;
+  lastUpdatedAt: string;
+  isActive:      boolean;
+}
 
 export class PipelineStateManager {
 
   private context: vscode.ExtensionContext;
+  /** Lazy one-shot migration of the legacy single-state key. */
+  private migrated = false;
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
   }
 
+  // --------------------------------------------------------------------
+  // Backwards-compatible getState / setState — operate on the ACTIVE pipeline
+  // --------------------------------------------------------------------
+
   public getState(): PipelineState | undefined {
-    return this.context.globalState.get<PipelineState>(STATE_KEY);
+    this.migrateLegacyOnce();
+    const activeId = this.context.globalState.get<string>(ACTIVE_KEY);
+    if (!activeId) return undefined;
+    const map = this.allStates();
+    return map[activeId];
   }
 
   public async setState(state: PipelineState): Promise<void> {
+    this.migrateLegacyOnce();
+    if (!state.pipelineId) {
+      // Defensive — every PipelineState going through here must carry an id.
+      // initPipeline always assigns one; any pre-migration state was given
+      // one during the migration step.
+      state.pipelineId = generatePipelineId();
+    }
     state.lastUpdatedAt = new Date().toISOString();
-    await this.context.globalState.update(STATE_KEY, state);
+    const map = this.allStates();
+    map[state.pipelineId] = state;
+    await this.context.globalState.update(STATES_KEY, map);
+    // First write of a state with no active pointer set -> make it active.
+    const activeId = this.context.globalState.get<string>(ACTIVE_KEY);
+    if (!activeId) {
+      await this.context.globalState.update(ACTIVE_KEY, state.pipelineId);
+    }
+  }
+
+  // --------------------------------------------------------------------
+  // Multi-pipeline operations
+  // --------------------------------------------------------------------
+
+  public listPipelines(): PipelineSummary[] {
+    this.migrateLegacyOnce();
+    const map = this.allStates();
+    const activeId = this.context.globalState.get<string>(ACTIVE_KEY);
+    return Object.values(map)
+      .filter((s): s is PipelineState => Boolean(s))
+      .map(s => ({
+        pipelineId:    s.pipelineId,
+        title:         s.title,
+        ricefwType:    s.ricefwType,
+        currentStage:  s.currentStage,
+        startedAt:     s.startedAt,
+        lastUpdatedAt: s.lastUpdatedAt,
+        isActive:      s.pipelineId === activeId
+      }))
+      .sort((a, b) => b.lastUpdatedAt.localeCompare(a.lastUpdatedAt));
+  }
+
+  public getActivePipelineId(): string | undefined {
+    this.migrateLegacyOnce();
+    return this.context.globalState.get<string>(ACTIVE_KEY);
+  }
+
+  public async switchPipeline(pipelineId: string): Promise<boolean> {
+    this.migrateLegacyOnce();
+    const map = this.allStates();
+    if (!map[pipelineId]) return false;
+    await this.context.globalState.update(ACTIVE_KEY, pipelineId);
+    return true;
+  }
+
+  public async deletePipeline(pipelineId: string): Promise<void> {
+    this.migrateLegacyOnce();
+    const map = this.allStates();
+    delete map[pipelineId];
+    await this.context.globalState.update(STATES_KEY, map);
+    const activeId = this.context.globalState.get<string>(ACTIVE_KEY);
+    if (activeId === pipelineId) {
+      // Auto-switch to the most-recently-touched remaining pipeline.
+      const remaining = Object.values(map)
+        .filter((s): s is PipelineState => Boolean(s))
+        .sort((a, b) => b.lastUpdatedAt.localeCompare(a.lastUpdatedAt));
+      await this.context.globalState.update(
+        ACTIVE_KEY,
+        remaining[0]?.pipelineId ?? undefined
+      );
+    }
+  }
+
+  private allStates(): Record<string, PipelineState> {
+    return this.context.globalState.get<Record<string, PipelineState>>(STATES_KEY) ?? {};
+  }
+
+  /** One-time migration of legacy single-pipeline state into the new map.
+   *  Runs on the first getState/setState/listPipelines call per session. */
+  private migrateLegacyOnce(): void {
+    if (this.migrated) return;
+    this.migrated = true;
+    const legacy = this.context.globalState.get<PipelineState>(STATE_KEY_LEGACY);
+    if (!legacy) return;
+    const map = this.context.globalState.get<Record<string, PipelineState>>(STATES_KEY);
+    if (map && Object.keys(map).length > 0) {
+      // Map already populated by a previous session — drop the legacy key.
+      this.context.globalState.update(STATE_KEY_LEGACY, undefined);
+      return;
+    }
+    const id = legacy.pipelineId ?? generatePipelineId();
+    legacy.pipelineId = id;
+    const newMap: Record<string, PipelineState> = { [id]: legacy };
+    this.context.globalState.update(STATES_KEY, newMap);
+    this.context.globalState.update(ACTIVE_KEY, id);
+    this.context.globalState.update(STATE_KEY_LEGACY, undefined);
   }
 
   public async updateStage(stage: PipelineStage): Promise<void> {
@@ -115,8 +246,13 @@ export class PipelineStateManager {
     await this.setState(state);
   }
 
+  /** Backwards-compatible name. In the multi-pipeline model this deletes
+   *  the ACTIVE pipeline and (if any other pipelines exist) auto-switches
+   *  to the most recently touched one. */
   public async clearState(): Promise<void> {
-    await this.context.globalState.update(STATE_KEY, undefined);
+    const activeId = this.context.globalState.get<string>(ACTIVE_KEY);
+    if (!activeId) return;
+    await this.deletePipeline(activeId);
   }
 
   public async saveStyleContext(styleContext: object): Promise<void> {
@@ -136,7 +272,12 @@ export class PipelineStateManager {
     sapPackage: string,
     brText: string
   ): Promise<void> {
+    // Every Start-Pipeline creates a NEW pipeline-id, even when other
+    // pipelines already exist. The new one becomes the active pipeline;
+    // prior pipelines remain in the map and can be reached via Switch.
+    const id = generatePipelineId();
     const state: PipelineState = {
+      pipelineId: id,
       title,
       ricefwType,
       objectType,
@@ -150,6 +291,8 @@ export class PipelineStateManager {
       lastUpdatedAt: new Date().toISOString(),
       referenceDocsLoaded: this.getStyleContext() !== undefined
     };
+    // Make the new pipeline active BEFORE writing so setState writes to it.
+    await this.context.globalState.update(ACTIVE_KEY, id);
     await this.setState(state);
   }
 
@@ -245,6 +388,31 @@ export class PipelineStateManager {
       ...obj, codeGenerated: false, codeAccepted: false
     }));
     await this.setState(state);
+  }
+
+  /** Per-pipeline output subfolder under the configured root.
+   *  Returns '' when no root is configured. Each pipeline gets its own
+   *  subfolder so each is its own self-contained abapGit repository and
+   *  switching pipelines doesn't clobber the prior one's files. */
+  public getPipelineOutputFolder(state?: PipelineState): string {
+    const s = state ?? this.getState();
+    if (!s) return '';
+    const root = vscode.workspace.getConfiguration()
+      .get<string>('darkhorse.pipeline.outputFolder', '');
+    if (!root) return '';
+    const slug = this.pipelineSlug(s);
+    const path = require('path');
+    return path.join(root, slug);
+  }
+
+  /** Filesystem-safe slug derived from the pipeline title + a short hash
+   *  of the pipelineId. Collisions are avoided even when two pipelines
+   *  share a title. */
+  public pipelineSlug(state: PipelineState): string {
+    const baseRaw = (state.title ?? 'pipeline').toLowerCase();
+    const base    = baseRaw.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+    const idSuffix = (state.pipelineId ?? '').slice(0, 4);
+    return idSuffix ? `${base}-${idSuffix}` : base;
   }
 
   public getStageSummary(): string {

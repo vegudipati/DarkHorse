@@ -62,7 +62,7 @@ export class FdsGenerator {
 
     const config = vscode.workspace.getConfiguration();
     const proxyPort = config.get<number>('darkhorse.pipeline.llmProxyPort', 47291);
-    const outputFolder = config.get<string>('darkhorse.pipeline.outputFolder', '');
+    const outputFolder = stateManager.getPipelineOutputFolder();
 
     if (!outputFolder) {
       vscode.window.showErrorMessage(
@@ -70,6 +70,9 @@ export class FdsGenerator {
       );
       return;
     }
+    // Ensure the per-pipeline subfolder exists before writing the FDS.
+    const fs = require('fs');
+    if (!fs.existsSync(outputFolder)) fs.mkdirSync(outputFolder, { recursive: true });
 
     // Get style context if available
     const styleContextObj = stateManager.getStyleContext() as any;

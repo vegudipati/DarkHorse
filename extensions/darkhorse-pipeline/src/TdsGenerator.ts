@@ -37,12 +37,14 @@ export class TdsGenerator {
 
     const config = vscode.workspace.getConfiguration();
     const proxyPort = config.get<number>('darkhorse.pipeline.llmProxyPort', 47291);
-    const outputFolder = config.get<string>('darkhorse.pipeline.outputFolder', '');
+    const outputFolder = stateManager.getPipelineOutputFolder();
 
     if (!outputFolder) {
       vscode.window.showErrorMessage('DarkHorse: Output folder not configured.');
       return;
     }
+    const fs = require('fs');
+    if (!fs.existsSync(outputFolder)) fs.mkdirSync(outputFolder, { recursive: true });
 
     const fdsDoc = JSON.parse(state.fdsContent) as FdsDocument;
     const solutionOverview = state.solutionOverview;

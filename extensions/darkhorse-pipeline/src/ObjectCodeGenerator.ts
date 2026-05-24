@@ -424,7 +424,7 @@ export class ObjectCodeGenerator {
           // object files using the correct .<type>.<ext> naming) so the
           // developer can cloneTo from ADT directly.
           const config = vscode.workspace.getConfiguration();
-          const outputFolder = config.get<string>('darkhorse.pipeline.outputFolder', '');
+          const outputFolder = stateManager.getPipelineOutputFolder();
           if (outputFolder) {
             try {
               const { saveAbapGit } = require('./AbapGitWriter');
@@ -478,8 +478,7 @@ export class ObjectCodeGenerator {
           const table = String(message.table ?? '').trim();
           if (!table) return;
 
-          const outputFolder = vscode.workspace.getConfiguration()
-            .get<string>('darkhorse.pipeline.outputFolder', '');
+          const outputFolder = stateManager.getPipelineOutputFolder();
           if (!outputFolder) {
             vscode.window.showErrorMessage(
               'DarkHorse: Output folder not configured — cannot save the Z wrapper view.'
