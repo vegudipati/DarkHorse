@@ -24,11 +24,19 @@ export class BrIntakePanel {
   public static async show(
     context: vscode.ExtensionContext,
     stateManager: PipelineStateManager,
-    tracker: PipelineTracker
+    tracker: PipelineTracker,
+    /** Optional pre-filled values (e.g. from a JSON intake file). When the
+     *  panel is already open we dispose it first so the prefill applies. */
+    prefill?: Partial<BrIntakeData>
   ): Promise<void> {
     if (BrIntakePanel.currentPanel) {
-      BrIntakePanel.currentPanel.panel.reveal(vscode.ViewColumn.One);
-      return;
+      if (prefill) {
+        // Replace the existing panel so the new prefilled HTML renders.
+        BrIntakePanel.currentPanel.panel.dispose();
+      } else {
+        BrIntakePanel.currentPanel.panel.reveal(vscode.ViewColumn.One);
+        return;
+      }
     }
     const panel = vscode.window.createWebviewPanel(
       'darkhorseBrIntake',
@@ -37,7 +45,7 @@ export class BrIntakePanel {
       { enableScripts: true }
     );
     BrIntakePanel.currentPanel = new BrIntakePanel(
-      panel, context, stateManager, tracker
+      panel, context, stateManager, tracker, prefill
     );
   }
 
@@ -45,7 +53,8 @@ export class BrIntakePanel {
     panel: vscode.WebviewPanel,
     context: vscode.ExtensionContext,
     stateManager: PipelineStateManager,
-    tracker: PipelineTracker
+    tracker: PipelineTracker,
+    prefill?: Partial<BrIntakeData>
   ) {
     this.panel = panel;
     this.context = context;
@@ -57,7 +66,7 @@ export class BrIntakePanel {
     const styleContext = stateManager.getStyleContext() as StyleContext | undefined;
     const refDocsLoaded = styleContext !== undefined && (styleContext.documentCount ?? 0) > 0;
 
-    this.panel.webview.html = this.getHtml(defaultPackage, refDocsLoaded, styleContext);
+    this.panel.webview.html = this.getHtml(defaultPackage, refDocsLoaded, styleContext, prefill);
 
     this.panel.webview.onDidReceiveMessage(async (message) => {
       switch (message.command) {
@@ -162,11 +171,31 @@ export class BrIntakePanel {
   }
 }
 
+  /** Escape a string for safe injection into HTML attributes / text. */
+  private escHtml(s: string): string {
+    return (s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   private getHtml(
     defaultPackage: string,
     refDocsLoaded: boolean,
-    styleContext?: StyleContext
+    styleContext?: StyleContext,
+    prefill?: Partial<BrIntakeData>
   ): string {
+    const pf = prefill ?? {};
+    const titleVal      = this.escHtml(pf.title ?? '');
+    const ricefwTypeVal = (pf.ricefwType ?? '').trim();
+    const objectTypeVal = (pf.objectType ?? '').trim();
+    const sapPackageVal = this.escHtml(pf.sapPackage ?? defaultPackage);
+    const brTextVal     = this.escHtml(pf.brText ?? '');
+    const outputVal     = this.escHtml(pf.outputFolder ?? '');
+    const sel = (option: string, want: string): string =>
+      option.toLowerCase() === want.toLowerCase() ? ' selected' : '';
     const refDocsNote = refDocsLoaded
       ? `✅ Reference documents loaded (${styleContext?.documentCount} doc${styleContext?.documentCount !== 1 ? 's' : ''}): ${styleContext?.loadedFiles?.join(', ')}`
       : '⚠️ No reference documents loaded. Generation will use default style.';
@@ -311,7 +340,7 @@ export class BrIntakePanel {
 
   <div class="form-group">
     <label>Pipeline Title <span class="required">*</span></label>
-    <input type="text" id="title" placeholder="e.g. ZFIN_OPEN_ITEMS - Finance Open Items Report" />
+    <input type="text" id="title" placeholder="e.g. ZFIN_OPEN_ITEMS - Finance Open Items Report" value="${titleVal}" />
     <div class="hint">A short name for this pipeline run. Used in document headers and Git commits.</div>
     <div class="error" id="err-title">Title is required</div>
   </div>
@@ -320,29 +349,29 @@ export class BrIntakePanel {
     <div class="form-group">
       <label>RICEFW Type <span class="required">*</span></label>
       <select id="ricefwType">
-        <option value="Report">Report (R)</option>
-        <option value="Interface">Interface (I)</option>
-        <option value="Conversion">Conversion (C)</option>
-        <option value="Enhancement">Enhancement (E)</option>
-        <option value="Form">Form (F)</option>
-        <option value="Workflow">Workflow (W)</option>
+        <option value="Report"${sel('Report', ricefwTypeVal)}>Report (R)</option>
+        <option value="Interface"${sel('Interface', ricefwTypeVal)}>Interface (I)</option>
+        <option value="Conversion"${sel('Conversion', ricefwTypeVal)}>Conversion (C)</option>
+        <option value="Enhancement"${sel('Enhancement', ricefwTypeVal)}>Enhancement (E)</option>
+        <option value="Form"${sel('Form', ricefwTypeVal)}>Form (F)</option>
+        <option value="Workflow"${sel('Workflow', ricefwTypeVal)}>Workflow (W)</option>
       </select>
     </div>
     <div class="form-group">
       <label>Primary Object Type</label>
       <select id="objectType">
-        <option value="PROG">Program (PROG)</option>
-        <option value="CLAS">Class (CLAS)</option>
-        <option value="FUGR">Function Group (FUGR)</option>
-        <option value="ENHC">Enhancement (ENHC)</option>
-        <option value="FORM">SmartForm (FORM)</option>
-        <option value="WFLO">Workflow (WFLO)</option>
+        <option value="PROG"${sel('PROG', objectTypeVal)}>Program (PROG)</option>
+        <option value="CLAS"${sel('CLAS', objectTypeVal)}>Class (CLAS)</option>
+        <option value="FUGR"${sel('FUGR', objectTypeVal)}>Function Group (FUGR)</option>
+        <option value="ENHC"${sel('ENHC', objectTypeVal)}>Enhancement (ENHC)</option>
+        <option value="FORM"${sel('FORM', objectTypeVal)}>SmartForm (FORM)</option>
+        <option value="WFLO"${sel('WFLO', objectTypeVal)}>Workflow (WFLO)</option>
       </select>
     </div>
     <div class="form-group">
       <label>SAP Package</label>
       <input type="text" id="sapPackage" placeholder="e.g. ZFINANCE"
-        value="${defaultPackage}" />
+        value="${sapPackageVal}" />
       <div class="hint">Z-package for generated objects</div>
     </div>
   </div>
@@ -357,7 +386,7 @@ export class BrIntakePanel {
 Example:
 As a Finance user, I need a custom ABAP report (ZFIN_OPEN_ITEMS) that displays open customer line items from table KNA1 and BSID, filtered by company code and posting date range. The report should show: Customer number, Customer name, Document number, Posting date, Amount in local currency, and Due date. Output should be displayed using ALV Grid. The report needs authorization check for object F_BKPF_BUK."
       oninput="updateCharCount()"
-    ></textarea>
+    >${brTextVal}</textarea>
     <div class="char-count" id="charCount">0 characters</div>
     <div class="error" id="err-br">Business Requirement is required</div>
   </div>
@@ -367,7 +396,7 @@ As a Finance user, I need a custom ABAP report (ZFIN_OPEN_ITEMS) that displays o
   <div class="form-group">
     <label>Output Folder <span class="required">*</span></label>
     <div class="folder-row">
-      <input type="text" id="outputFolder" placeholder="Select folder where FDS and TDS will be saved..." readonly />
+      <input type="text" id="outputFolder" placeholder="Select folder where FDS and TDS will be saved..." readonly value="${outputVal}" />
       <button class="btn-pick" onclick="pickFolder()">Browse...</button>
     </div>
     <div class="hint">FDS and TDS .docx files will be saved here and committed to Git.</div>
@@ -386,6 +415,8 @@ As a Finance user, I need a custom ABAP report (ZFIN_OPEN_ITEMS) that displays o
       const len = document.getElementById('brText').value.length;
       document.getElementById('charCount').textContent = len + ' characters';
     }
+    // Run once on page load so the counter reflects prefilled BR text.
+    window.addEventListener('DOMContentLoaded', updateCharCount);
 
     function pickFolder() {
       vscode.postMessage({ command: 'pickOutputFolder' });

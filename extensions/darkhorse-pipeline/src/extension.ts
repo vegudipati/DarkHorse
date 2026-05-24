@@ -6,6 +6,56 @@ let tracker: PipelineTracker;
 let stateManager: PipelineStateManager;
 let statusBarItem: vscode.StatusBarItem;
 
+/** Map a structured RICEFW/RTM intake JSON into BrIntakeData prefill values.
+ *  Tolerant of missing fields — anything not present comes through as
+ *  undefined and the developer can fill it in the panel. */
+function mapJsonToBrIntake(json: any): {
+  title?: string; ricefwType?: string; objectType?: string;
+  sapPackage?: string; brText?: string; outputFolder?: string;
+} {
+  if (!json || typeof json !== 'object') return {};
+  // Title combines ricefw_id + title (SAP convention). Either alone is acceptable.
+  const ricefwId = (json.ricefw_id ?? '').toString().trim();
+  const titleRaw = (json.title     ?? '').toString().trim();
+  const title    = ricefwId && titleRaw ? `${ricefwId} - ${titleRaw}`
+                 : titleRaw             ? titleRaw
+                 : ricefwId             ? ricefwId
+                 :                        '';
+  // ricefw_type values in the JSON ("Report", "Interface", "Enhancement", ...)
+  // already match the panel's option values.
+  const ricefwType = (json.ricefw_type ?? '').toString().trim();
+
+  // Synthesize a multi-section BR text the LLM can chew on.
+  const lines: string[] = [];
+  if (ricefwId)         lines.push(`RICEFW ID: ${ricefwId}`);
+  if (json.workstream)  lines.push(`Workstream: ${json.workstream}`);
+  if (json.build_sprint) lines.push(`Sprint: ${json.build_sprint}`);
+  if (lines.length > 0) lines.push('');
+  if (json.long_description) {
+    lines.push('## Description');
+    lines.push(json.long_description.toString());
+    lines.push('');
+  }
+  if (Array.isArray(json.rtm_details) && json.rtm_details.length > 0) {
+    lines.push('## RTM Details');
+    json.rtm_details.forEach((r: any, i: number) => {
+      const id = r.rtm_id ?? `RTM ${i + 1}`;
+      lines.push('');
+      lines.push(`### ${id}`);
+      if (r.business_requirements) lines.push(`**Business requirement:** ${r.business_requirements}`);
+      if (r.requirement_status)    lines.push(`**Status:** ${r.requirement_status}`);
+      if (r.user_story_deloitte)   lines.push(`**User story:** ${r.user_story_deloitte}`);
+      if (r.user_story_unfi)       lines.push(`**User story (client):** ${r.user_story_unfi}`);
+      if (r.description)           lines.push(`**Description:** ${r.description}`);
+      if (r.acceptance_criteria)   lines.push(`**Acceptance criteria:** ${r.acceptance_criteria}`);
+    });
+  } else if (!json.long_description) {
+    // Fallback: dump the raw object if no recognised sections were present.
+    lines.push(JSON.stringify(json, null, 2));
+  }
+  return { title, ricefwType, brText: lines.join('\n').trim() };
+}
+
 /** Refresh the multi-pipeline status bar item (active pipeline name + stage).
  *  Called after any state change so the bar reflects reality. */
 function refreshStatusBar(): void {
@@ -62,6 +112,54 @@ export function activate(context: vscode.ExtensionContext) {
       await stateManager.resetCodeGeneration();
       tracker.refresh();
       vscode.window.showInformationMessage('DarkHorse: Code generation reset. Use Resume Pipeline to retry.');
+    })
+  );
+
+  // JSON intake — start a pipeline from a structured RICEFW/RTM JSON file.
+  // Schema: { ricefw_id, title, workstream, ricefw_type, long_description,
+  // build_sprint, rtm_ids[], rtm_details[{rtm_id, business_requirements,
+  // requirement_status, user_story_deloitte, user_story_unfi, description,
+  // acceptance_criteria}] }. We open a file picker, parse the JSON, map it
+  // to the BrIntakeData shape, and open the BR intake panel prefilled so
+  // the developer can review + add the missing fields (output folder, SAP
+  // package, primary object type) before submitting.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.startFromJson', async () => {
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectMany:  false,
+        filters:        { 'BR intake JSON': ['json'] },
+        title:          'DarkHorse: pick a BR intake JSON file'
+      });
+      if (!picked || picked.length === 0) return;
+      const fs = require('fs');
+      let raw: string;
+      try {
+        raw = fs.readFileSync(picked[0].fsPath, 'utf8');
+      } catch (err: any) {
+        vscode.window.showErrorMessage(
+          `DarkHorse: could not read JSON file — ${err?.message ?? err}`
+        );
+        return;
+      }
+      let json: any;
+      try {
+        json = JSON.parse(raw);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(
+          `DarkHorse: invalid JSON — ${err?.message ?? err}`
+        );
+        return;
+      }
+      const prefill = mapJsonToBrIntake(json);
+      if (!prefill.title) {
+        vscode.window.showErrorMessage(
+          'DarkHorse: JSON missing "title" (and "ricefw_id"). Expected RICEFW/RTM schema with at least one of those fields.'
+        );
+        return;
+      }
+      const { BrIntakePanel } = require('./BrIntakePanel');
+      await BrIntakePanel.show(context, stateManager, tracker, prefill);
     })
   );
 

@@ -2,7 +2,7 @@
   "name": "darkhorse-pipeline",
   "displayName": "DarkHorse Pipeline",
   "description": "BR → FDS → TDS → Code pipeline for SAP RICEFW development",
-  "version": "0.7.30",
+  "version": "0.7.31",
   "publisher": "deloitte-darkhorse",
   "engines": {
     "vscode": "^1.85.0"
@@ -36,6 +36,10 @@
       {
         "command": "darkhorse.pipeline.start",
         "title": "DarkHorse: Start BR → FDS → TDS → Code Pipeline"
+      },
+      {
+        "command": "darkhorse.pipeline.startFromJson",
+        "title": "DarkHorse: Start Pipeline from JSON"
       },
       {
         "command": "darkhorse.pipeline.loadReferenceDocs",
