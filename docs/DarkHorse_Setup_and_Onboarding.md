@@ -7,7 +7,7 @@ AI pipeline. It covers three audiences:
 2. **Client onboarding** — done **once per client engagement**
 3. **Per-pipeline workflow** — done **for every Business Requirement**
 
-> Updated: 2026-05-22 — covers extension v0.7.9 (CPI-6 items 1–4 Phase A).
+> Updated: 2026-05-23 — covers extension v0.7.26 (CPI-6 items 1–4 + bugs B1–B5 + architectural gaps A1–A7 + auto-fill + TDS-refresh).
 
 ---
 
@@ -15,7 +15,8 @@ AI pipeline. It covers three audiences:
 
 DarkHorse is a VS Code extension + a set of local services that turn a written
 Business Requirement (BR) into a deterministic, Clean-Core-compliant SAP
-deliverable:
+deliverable expressed as an **abapGit-ready folder** that any developer can
+`cloneTo` from ADT directly into an S/4HANA system:
 
 ```
 BR text  →  Solution Overview (Clean Core levels)  →  FDS (.docx)
@@ -23,13 +24,40 @@ BR text  →  Solution Overview (Clean Core levels)  →  FDS (.docx)
                                                        TDS (.docx)
                                                          ↓
                                        ABAP / CDS / BDEF / SRVD / SRVB code
+                                                         ↓
+                                       abapGit layout output folder
+                                                         ↓
+                                       ADT → activate → transport → S/4HANA
 ```
 
 Every LLM call is **grounded** through the DarkHorse MCP server (real SAP
 released-API knowledge, RAP/CDS patterns, Fiori templates, Adobe Forms,
-SLG1 logging, BAdI catalog). Every generated object carries an audit
-header with a 16-hex DarkHorse UID that is also appended to a tamper-evident
-log file (`~/.darkhorse/ai-generation-log.jsonl`).
+SLG1 logging, BAdI catalog) and through deterministic rule sets for Clean
+Core layering, HANA push-down, authorization depth, and ABAP-Cloud cloud-
+readiness. Every generated object carries an audit header with a 16-hex
+DarkHorse UID that is also appended to a tamper-evident log file
+(`~/.darkhorse/ai-generation-log.jsonl`).
+
+The pipeline enforces the **Clean Core three-layer contract end-to-end**:
+for any service-bearing entity, the abapObjectList must include ZI_* +
+ZC_* + ZUI_* + ZUI_*_O4 + DCL, plus BDEF + ZBP_I_* + test class when
+transactional. Missing layers are **auto-synthesised** at TDS generation
+and at approval — the developer never hand-edits the TDS to satisfy
+Clean Core. Per-role grounding (interface vs consumption vs service def
+vs DCL vs BDEF vs behavior class vs test) ships to the code agent so the
+LLM produces correct shape on the first pass. A post-generation verifier
+catches anything the LLM still got wrong: UI annotations on the wrong
+layer, ZI_* exposed by a service definition, AUTHORITY-CHECK in a behavior
+class, ENDSELECT loops, SELECT *, nested SELECT inside LOOP, classes
+without FOR TESTING blocks, and ABAP-Cloud-forbidden statements
+(CALL TRANSACTION, LEAVE TO TRANSACTION, SUBMIT, OPEN DATASET, WAIT UP TO,
+literal RFC destinations).
+
+After each Accept the **TDS .docx auto-refreshes** with the current per-
+object status ([Accepted ✓] / [Generated — pending review] / [Pending]),
+and a sibling `pipeline-generation-report.md` captures pipeline metadata,
+object counts, auto-fill provenance, and FDS-divergence guidance. The FDS
+is never auto-rewritten — it remains the business analyst's signed artefact.
 
 ---
 
@@ -358,7 +386,148 @@ This writes per-object `corrections/*.json` files containing the diff between
 the AI output and the developer's final code. Local-only — not indexed
 into a shared RAG. Future enhancement: opt-in indexing.
 
-### 3.4 Audit-log verification (periodic / on demand)
+### 3.4 The output folder and how it gets into S/4HANA
+
+When a pipeline finishes, the configured `darkhorse.pipeline.outputFolder`
+is structured as a valid abapGit repository — the de-facto Git-on-ABAP
+tool used in every Clean Core / RAP / ABAP Cloud project. It can be
+pushed to a Git remote, or opened directly from ADT (Eclipse with ABAP
+plugins) as a local abapGit source.
+
+#### What you'll find in the folder
+
+```
+<outputFolder>/
+├── .abapgit.xml                              ← repo config (STARTING_FOLDER=/src/)
+├── <pipeline>_FDS_v1_0.docx                  ← business deliverable (untouched after creation)
+├── <pipeline>_TDS_v1_0.docx                  ← technical deliverable (auto-refreshed after every Accept)
+├── pipeline-generation-report.md             ← audit trail of what was generated vs planned
+└── src/                                      ← actual SAP code (the abapGit payload)
+    ├── package.devc.xml                      ← SAP package definition
+    ├── zi_routing_detail.ddls.asddls         ← Interface CDS view
+    ├── zc_routing_detail.ddls.asddls         ← Consumption CDS view
+    ├── zui_routing_detail.srvd.srvd.asddls   ← Service definition
+    ├── zui_routing_detail_o4.srvb.xml        ← OData V4 service binding
+    ├── zi_routing_detail.dcls.asdcls         ← DCL access role
+    ├── zi_routing_detail.bdef.asbdef         ← Behavior definition
+    ├── zbp_i_routing_detail.clas.abap (+ .xml) ← Behavior projection class
+    ├── zcl_test_routing_detail.clas.abap (+ .xml) ← ABAP Unit test class
+    └── ...
+```
+
+#### Root vs `src/`
+
+The **root** holds artefacts for humans / governance:
+- FDS .docx — for the business analyst / functional consultant
+- TDS .docx — for the technical lead (auto-refreshed as objects flip to Accepted)
+- `pipeline-generation-report.md` — what was auto-added, what was regenerated, any divergence from FDS
+- `.abapgit.xml` — tells abapGit where the SAP code lives (`/src/`)
+
+The **`src/`** folder holds artefacts for the SAP system. Every file maps
+1:1 to an SAP development object. `package.devc.xml` defines the SAP package
+that gets created when abapGit pulls.
+
+#### How the file names work
+
+abapGit needs two pieces of info from each file name:
+
+| Part | What it encodes | Example |
+|---|---|---|
+| Lowercased name | SAP object name | `zi_routing_detail` |
+| `.<type>.` | SAP object type | `.ddls.` = DDL source, `.clas.` = class, `.bdef.` = behavior def, `.srvd.` = service def, `.srvb.` = service binding, `.dcls.` = DCL role |
+| `.<ext>` | File format | `.abap` = ABAP source, `.asddls` = DDL source, `.asbdef` / `.asdcls` / `.asddlx` = SAP source dialects, `.xml` = metadata |
+
+So `zi_routing_detail.ddls.asddls` = "SAP DDLS object `ZI_ROUTING_DETAIL`,
+content is DDL source." The XML companion (`.clas.xml`, `.intf.xml`,
+`.prog.xml`) carries metadata the source can't express — language code,
+descriptions, behavior flags, exposure visibility.
+
+#### File-to-S/4HANA-object mapping
+
+| Output file | What it becomes in S/4HANA | Where in ADT |
+|---|---|---|
+| `zi_*.ddls.asddls` | Data Definition (DDLS) — interface view | Core Data Services → Data Definitions |
+| `zc_*.ddls.asddls` | Data Definition (DDLS) — consumption view | Core Data Services → Data Definitions |
+| `zui_*.srvd.srvd.asddls` | Service Definition (SRVD) | Business Services → Service Definitions |
+| `zui_*_o4.srvb.xml` | Service Binding (SRVB) — OData V4 | Business Services → Service Bindings |
+| `zi_*.dcls.asdcls` | Data Control (DCLS) — access role | Core Data Services → Access Controls |
+| `zi_*.bdef.asbdef` | Behavior Definition (BDEF) | Core Data Services → Behavior Definitions |
+| `zbp_i_*.clas.abap` (+ .xml) | ABAP Class — behavior projection | Source Code Library → Classes |
+| `zcl_test_*.clas.abap` (+ .xml) | ABAP Class — ABAP Unit test | Source Code Library → Classes (test runner) |
+| `<name>.prog.abap` (+ .xml) | Report (PROG) | Source Code Library → Programs |
+
+#### The end-to-end workflow to S/4HANA
+
+```
+┌─────────────────────────────┐
+│ Your machine (DarkHorse)    │
+│  BR → FDS → TDS → Code      │
+│        ↓                     │
+│  output/  (this folder)     │
+└──────────────┬──────────────┘
+               │
+               │  Two paths to S/4HANA:
+        ┌──────┴──────┐
+        ↓             ↓
+┌─────────────┐  ┌──────────────────┐
+│ Push to a    │  │ Open output/ as  │
+│ Git remote   │  │ local abapGit    │
+│ (GitHub /    │  │ source in ADT    │
+│  Azure DevOps│  │                  │
+│  / Bitbucket)│  │                  │
+└──────┬───────┘  └────────┬─────────┘
+       └────────┬──────────┘
+                ↓
+       ┌─────────────────────────────┐
+       │ Developer in ADT:           │
+       │  abapGit → Clone / Pull     │
+       │  ├─ Reads .abapgit.xml      │
+       │  ├─ Creates SAP package     │
+       │  │   from package.devc.xml  │
+       │  └─ For each src/ file:     │
+       │       map ext → object type │
+       │       create object         │
+       │       load source           │
+       └────────────┬────────────────┘
+                    ↓
+       ┌─────────────────────────────┐
+       │ Developer:                  │
+       │  - Reviews each object       │
+       │  - Activates (Ctrl+F3)       │
+       │  - Assigns to Transport      │
+       │    Request (TR)              │
+       │  - Runs ABAP Unit tests      │
+       └────────────┬────────────────┘
+                    ↓
+       ┌─────────────────────────────┐
+       │ Transport landscape:         │
+       │  DEV → QAS → PRD             │
+       │  (or gCTS / SAP CTS+ for     │
+       │   cloud transports)          │
+       └─────────────────────────────┘
+```
+
+#### What the developer sees in S/4HANA after `abapGit Pull` + activate
+
+- Open `ZUI_<X>_O4` service binding → "Service Binding URL" → the **OData
+  service is live**.
+- Open `ZC_<X>` → "Preview" → SAP shows the **Fiori Elements floorplan**
+  rendered from the `@UI` annotations.
+- Run `ZCL_TEST_<X>` → **ABAP Unit test runner** executes.
+- Open DCL role `ZI_<X>` → authorization preview confirms the role
+  enforces correctly.
+
+#### Why this layout matters for Clean Core
+
+Clean Core / RAP / ABAP-for-Cloud-Development **requires** declarative
+first-class objects (DDLS / BDEF / SRVD / SRVB / DCLS / CLAS) — not
+classic reports + dynpros. The file naming forces that discipline: there
+is no `.prog.abap` slot for a CALL-TRANSACTION-style report unless the
+pipeline explicitly emits one (and the verifier flags it as a Level B
+finding). So the folder structure is the **physical embodiment of the
+three-layer contract** the pipeline enforces from A1–A6.
+
+### 3.5 Audit-log verification (periodic / on demand)
 
 ```
 Ctrl+Shift+P → "DarkHorse: Verify AI Log Chain"
