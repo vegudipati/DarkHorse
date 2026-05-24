@@ -30,6 +30,48 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Selective regen — re-generate ONE specific object without re-running
+  // the whole pipeline. Prompts the developer to pick which object via
+  // QuickPick, then runs the standard preview/accept flow for just that
+  // one. The pipeline's currentObjectIndex and stage are NOT changed.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.regenerateObject', async () => {
+      const state = stateManager.getState();
+      if (!state) {
+        vscode.window.showInformationMessage(
+          'DarkHorse: No active pipeline. Start one first with "Start Pipeline".'
+        );
+        return;
+      }
+      const objects = state.abapObjects ?? [];
+      if (objects.length === 0) {
+        vscode.window.showInformationMessage(
+          'DarkHorse: This pipeline has no ABAP objects yet. Approve the TDS first.'
+        );
+        return;
+      }
+      const items = objects.map((o, idx) => ({
+        label:       `${o.sequence}. ${o.objectName}`,
+        description: o.objectType,
+        detail:      o.codeAccepted
+                       ? '✓ Accepted — regen will replace the saved code'
+                       : o.codeGenerated
+                         ? '○ Generated but not accepted — regen will replace pending output'
+                         : '◇ Not yet generated — regen will produce the first version',
+        index:       idx
+      }));
+      const pick = await vscode.window.showQuickPick(items, {
+        title:       'DarkHorse: which object to regenerate?',
+        placeHolder: 'Pick the object — only this one will be regenerated; others stay as-is',
+        matchOnDescription: true,
+        matchOnDetail:      true
+      });
+      if (!pick) return;
+      const { ObjectCodeGenerator } = require('./ObjectCodeGenerator');
+      await ObjectCodeGenerator.regenerateSingle(pick.index, stateManager, tracker);
+    })
+  );
+
   // Command: Load reference documents
   context.subscriptions.push(
     vscode.commands.registerCommand('darkhorse.pipeline.loadReferenceDocs', async () => {

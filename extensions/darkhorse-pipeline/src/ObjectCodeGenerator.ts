@@ -94,6 +94,71 @@ export class ObjectCodeGenerator {
   }
 
   /**
+   * Selective regen — regenerate code for ONE specific object (by index)
+   * without re-running siblings and without advancing currentObjectIndex.
+   * Used when a single object needs a redo (LLM produced something wrong,
+   * developer edited the keyLogic, sibling regenerated and we want to
+   * cascade). The accept/reject result only updates THAT object's state.
+   */
+  public static async regenerateSingle(
+    index: number,
+    stateManager: PipelineStateManager,
+    tracker: PipelineTracker
+  ): Promise<void> {
+    const state = stateManager.getState();
+    if (!state || !state.tdsContent) {
+      vscode.window.showErrorMessage('DarkHorse: No approved TDS found.');
+      return;
+    }
+    const objects = state.abapObjects;
+    if (!objects || index < 0 || index >= objects.length) {
+      vscode.window.showErrorMessage(`DarkHorse: Invalid object index ${index}.`);
+      return;
+    }
+    const tdsDoc = JSON.parse(state.tdsContent) as TdsDocument;
+    const obj = objects[index];
+
+    // Reset the object's generation state so the preview/accept path treats
+    // this as a fresh first-pass generation (no stale accepted code carried
+    // over from a previous run).
+    obj.codeGenerated = false;
+    obj.codeAccepted  = false;
+    obj.generatedCode = undefined;
+    await stateManager.setState(state);
+    tracker.refresh();
+
+    const accepted = await ObjectCodeGenerator.generateObject(
+      index, obj, tdsDoc, stateManager, tracker
+    );
+
+    if (accepted === undefined) {
+      // Developer closed the panel without accepting/rejecting — leave the
+      // object in its reset state. They can regen again at will.
+      tracker.refresh();
+      return;
+    }
+
+    // Mirror what the main loop does for ONE object only — do NOT advance
+    // currentObjectIndex (other objects haven't been touched) and do NOT
+    // change the pipeline stage. We hand-set the per-object flags so the
+    // tracker shows the regenerated object correctly without flipping the
+    // pipeline to "complete" prematurely.
+    const final = stateManager.getState();
+    if (final) {
+      final.abapObjects[index].codeGenerated = true;
+      final.abapObjects[index].codeAccepted  = accepted;
+      await stateManager.setState(final);
+    }
+    tracker.refresh();
+
+    vscode.window.showInformationMessage(
+      accepted
+        ? `DarkHorse: ${obj.objectName} regenerated ✓`
+        : `DarkHorse: ${obj.objectName} rejected — keep editing as needed.`
+    );
+  }
+
+  /**
    * Generate code for a single ABAP object.
    * Shows a confirmation dialog, calls LLM, shows diff preview.
    * Returns true if accepted, false if rejected, undefined if skipped/cancelled.
