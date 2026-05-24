@@ -482,6 +482,21 @@ export class ObjectCodeGenerator {
       version:       '1.0'
     });
 
+    // CPI-6 A11 — extract FDS anchors once per object (deterministic regex
+    // pass over the FDS corpus). Passed to the verifier so it can fidelity-
+    // check that the FDS-specified identifiers / labels actually appear in
+    // the generated code. Applies to every RICEFW type + every object type
+    // — the verifier emits the finding only when coverage is poor.
+    let fdsAnchors: any | undefined;
+    if (fdsCorpus && fdsCorpus.length > 0) {
+      try {
+        const { extractFdsAnchors } = require('./FdsAnchorExtractor');
+        fdsAnchors = extractFdsAnchors(fdsCorpus);
+      } catch (err: any) {
+        console.warn(`[DarkHorse] FDS anchor extraction (verifier) failed: ${err?.message ?? err}`);
+      }
+    }
+
     // Post-generation in parallel:
     //   - CleanCoreVerifier  (deterministic regex + MCP catalog lookup)
     //   - ReviewAgent        (LLM critic; catches judgment-call issues)
@@ -489,7 +504,7 @@ export class ObjectCodeGenerator {
     // fully-acknowledged report passes. Both reports surface in the preview;
     // only Clean Core verdict=fail blocks Accept.
     const [reportRes, reviewRes] = await Promise.allSettled([
-      verifyGeneratedCode(generatedCode, resolveMcpPort(), acknowledgements),
+      verifyGeneratedCode(generatedCode, resolveMcpPort(), acknowledgements, fdsAnchors),
       reviewGeneratedCode(obj, generatedCode, proxyPort)
     ]);
 
@@ -517,7 +532,7 @@ export class ObjectCodeGenerator {
       generatedCode = autoFix.fixedCode;
 
       const [reportRes2, reviewRes2] = await Promise.allSettled([
-        verifyGeneratedCode(generatedCode, resolveMcpPort(), acknowledgements),
+        verifyGeneratedCode(generatedCode, resolveMcpPort(), acknowledgements, fdsAnchors),
         reviewGeneratedCode(obj, generatedCode, proxyPort)
       ]);
       if (reportRes2.status === 'fulfilled') report = reportRes2.value;
@@ -702,11 +717,20 @@ export class ObjectCodeGenerator {
             currentCode = result.rewrittenCode;
 
             // Re-run verifier + reviewer on the rewritten code so the panel
-            // reflects the corrected state.
+            // reflects the corrected state. CPI-6 A11 — re-extract anchors
+            // from current state so the fidelity check applies here too.
             const proxyPort = vscode.workspace.getConfiguration()
               .get<number>('darkhorse.pipeline.llmProxyPort', 47291);
+            let zwrapAnchors: any | undefined;
+            try {
+              const corpus = ObjectCodeGenerator.extractFdsCorpus(stateManager);
+              if (corpus) {
+                const { extractFdsAnchors } = require('./FdsAnchorExtractor');
+                zwrapAnchors = extractFdsAnchors(corpus);
+              }
+            } catch { /* non-fatal */ }
             const [vRes, rRes] = await Promise.allSettled([
-              verifyGeneratedCode(currentCode, resolveMcpPort(), Array.from(stickyAcks)),
+              verifyGeneratedCode(currentCode, resolveMcpPort(), Array.from(stickyAcks), zwrapAnchors),
               reviewGeneratedCode(obj, currentCode, proxyPort)
             ]);
             if (vRes.status === 'fulfilled') currentReport = vRes.value;

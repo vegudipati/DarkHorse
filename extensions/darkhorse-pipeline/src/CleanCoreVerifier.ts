@@ -51,7 +51,7 @@ export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D';
 export type Verdict        = 'pass' | 'warn' | 'fail' | 'skipped';
 
 export interface CleanCoreFinding {
-  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf' | 'test' | 'btp' | 'enhancement' | 'completeness';
+  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf' | 'test' | 'btp' | 'enhancement' | 'completeness' | 'fidelity';
   reference:    string;          // raw token found in the source
   exists:       boolean | null;  // null if the tool doesn't return existence
   level:        CleanCoreLevel | null;
@@ -670,7 +670,20 @@ async function isMcpUp(port: number): Promise<boolean> {
 export async function verifyGeneratedCode(
   code: string,
   mcpPort: number = resolveMcpPort(),
-  acknowledgements: readonly string[] = []
+  acknowledgements: readonly string[] = [],
+  /** CPI-6 A11 — anchors extracted from the FDS for this pipeline. When
+   *  provided, the verifier substring-checks each anchor against the
+   *  generated code and emits a 'fidelity' Level B finding when coverage
+   *  is poor. Pass undefined / null to skip the check. Applies to every
+   *  RICEFW type and every object type. */
+  expectedAnchors?: {
+    quotedIds:    string[];
+    sapTables:    string[];
+    transactions: string[];
+    badis:        string[];
+    fieldLabels:  string[];
+    hasAnchors:   boolean;
+  }
 ): Promise<CleanCoreReport> {
 
   const scannedAt = new Date().toISOString();
@@ -906,6 +919,58 @@ export async function verifyGeneratedCode(
       occurrences:  count,
       acknowledged: ackFor(`AUTHORITY-CHECK ${authObj}`)
     });
+  }
+
+  // ---- CPI-6 A11: FDS-anchor coverage --------------------------------------
+  // The LLM was given verbatim anchors (quoted IDs, transactions, tables,
+  // BAdIs, field labels) extracted from the FDS. Substring-check the code
+  // for each anchor. When coverage is poor (less than 50% present AND at
+  // least 3 anchors are missing), emit a fidelity Level B finding listing
+  // what the FDS specified but the LLM omitted. Threshold guards against
+  // false positives on small-N (a tiny CDS view legitimately won't
+  // mention every FDS string).
+  if (expectedAnchors && expectedAnchors.hasAnchors) {
+    const all = [
+      ...expectedAnchors.quotedIds,
+      ...expectedAnchors.sapTables,
+      ...expectedAnchors.transactions,
+      ...expectedAnchors.badis,
+      ...expectedAnchors.fieldLabels
+    ];
+    if (all.length >= 3) {
+      const lower = code.toLowerCase();
+      const missing: string[] = [];
+      let found = 0;
+      for (const a of all) {
+        if (lower.includes(a.toLowerCase())) found += 1;
+        else missing.push(a);
+      }
+      const coverage = found / all.length;
+      // Hard rule when 0 anchors present and at least 3 were expected — the
+      // LLM clearly ignored the FDS anchors block.
+      // Soft rule when coverage is below 50%.
+      if (coverage < 0.5 && missing.length >= 3) {
+        const previewMissing = missing.slice(0, 12).map(s => `"${s}"`).join(', ');
+        const more = missing.length > 12 ? ` (+${missing.length - 12} more)` : '';
+        findings.push({
+          category:     'fidelity',
+          reference:    `FDS anchor coverage (${found}/${all.length})`,
+          exists:       true,
+          level:        'B',
+          description:
+            `The FDS specifies ${all.length} concrete identifier(s) / label(s) for this ` +
+            `deliverable, but only ${found} appear in the generated code. The code ` +
+            `is using its own naming instead of the FDS naming. Missing: ` +
+            `${previewMissing}${more}.`,
+          alternative:
+            `Re-generate this object after acknowledging the missing anchors, or edit ` +
+            `the code to use the FDS strings verbatim. Pre-LLM grounding already lists ` +
+            `these — the LLM substituted equivalents anyway.`,
+          occurrences:  missing.length,
+          acknowledged: ackFor(`FDS anchor coverage (${found}/${all.length})`)
+        });
+      }
+    }
   }
 
   // ---- CPI-6 A10: completeness antipatterns -------------------------------

@@ -36,8 +36,13 @@ const RX_TX_CODE = /\b([A-Z]{2,4}\d{1,3})\b/g;
 const RX_UPPER_TOKEN = /\b([A-Z][A-Z0-9_]{3,40})\b/g;
 
 /** Title-cased multi-word phrase — typical field labels like "Sales Channel",
- *  "Chain Code", "Master Chain". 2-4 words, each starting with uppercase. */
-const RX_TITLE_PHRASE = /\b((?:[A-Z][a-z]+\s+){1,3}[A-Z][a-z]+)\b/g;
+ *  "Chain Code", "Master Chain", "SRP Type", "BP Role", "EDI Indicator",
+ *  "OData Service". Each word may be either Title-case (Sales, Channel) or
+ *  an all-caps acronym 2-5 letters (SRP, BP, EDI, OData uses uppercase-O
+ *  followed by lowercase rest so it matches the Title-case branch). 2-4
+ *  words total. */
+const RX_TITLE_WORD   = '(?:[A-Z][a-z]+|[A-Z]{2,5})';
+const RX_TITLE_PHRASE = new RegExp(`\\b((?:${RX_TITLE_WORD}\\s+){1,3}${RX_TITLE_WORD})\\b`, 'g');
 
 /** BAdI / Enhancement spot naming conventions — usually end in _CS / _PRE /
  *  _POST / _BADI / contain ADD_DATA. */
@@ -55,12 +60,20 @@ const GENERIC_TOKENS = new Set<string>([
   'FIORI', 'UI5', 'UNFI'
 ]);
 
-// Title-cased phrases that are common boilerplate, filtered out.
+// Title-cased phrases that are common boilerplate, filtered out. The
+// relaxed regex (acronym + Title) lets through new combinations that the
+// previous regex missed — add them here as they appear in real FDS corpora.
 const GENERIC_TITLE_PHRASES = new Set<string>([
   'Business Requirement', 'User Story', 'Acceptance Criteria',
   'Functional Design', 'Technical Design', 'Clean Core',
   'Sales User', 'Sales Order', 'Customer Master',  // these creep in if too common
-  'Order Type', 'Order Types'
+  'Order Type', 'Order Types',
+  // Generic descriptor combos the relaxed regex catches:
+  'TODO Item', 'FIXME Note', 'NOTE That',
+  'BR Text', 'FDS Text', 'TDS Text', 'API Call', 'SAP System',
+  'SAP Standard', 'SAP Note', 'ABAP Code', 'ABAP Class',
+  // Pipeline-pattern boilerplate:
+  'BR FDS', 'FDS TDS', 'TDS Code', 'Pipeline Run'
 ]);
 
 // ---------------------------------------------------------------------------
