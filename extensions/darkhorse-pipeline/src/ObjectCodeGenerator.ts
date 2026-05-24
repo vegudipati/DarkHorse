@@ -1593,7 +1593,38 @@ Inline comments inside the BODY of the code remain REQUIRED — explain non-obvi
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(payload)
         },
-        timeout: 120000  // 2 minutes for code generation
+        timeout: 120000  // socket-idle timeout (only fires when no data)
+      };
+
+      // Absolute hard timeout — fires regardless of socket activity. Some
+      // streaming-friendly proxies keep the connection alive even when the
+      // upstream Claude call is hung, so the socket-idle timeout never
+      // fires and the request waits forever. 5 minutes is generous for
+      // long generations but bounded so the pipeline can never hang.
+      let settled = false;
+      const HARD_TIMEOUT_MS = 5 * 60 * 1000;
+      const hardTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { req.destroy(); } catch { /* ignore */ }
+        reject(new Error(
+          `Code generation hard-timeout after ${HARD_TIMEOUT_MS / 1000}s. ` +
+          `The LLM proxy did not respond. Check the proxy log; restart it if needed. ` +
+          `You can re-attempt this object via DarkHorse: Regenerate One Object.`
+        ));
+      }, HARD_TIMEOUT_MS);
+
+      const safeResolve = (v: { code: string; model: string }): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(hardTimer);
+        resolve(v);
+      };
+      const safeReject = (e: Error): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(hardTimer);
+        reject(e);
       };
 
       const req = http.request(options, (res: any) => {
@@ -1603,25 +1634,25 @@ Inline comments inside the BODY of the code remain REQUIRED — explain non-obvi
           try {
             const parsed = JSON.parse(data);
             if (res.statusCode >= 400) {
-              reject(new Error(parsed.error ?? `Proxy error: ${res.statusCode}`));
+              safeReject(new Error(parsed.error ?? `Proxy error: ${res.statusCode}`));
               return;
             }
-            resolve({
+            safeResolve({
               code:  parsed.code ?? parsed.content ?? '',
               model: parsed.model ?? 'unknown'
             });
           } catch {
-            resolve({ code: data, model: 'unknown' });
+            safeResolve({ code: data, model: 'unknown' });
           }
         });
       });
 
       req.on('timeout', () => {
-        req.destroy();
-        reject(new Error('Code generation timed out after 2 minutes. Try again.'));
+        try { req.destroy(); } catch { /* ignore */ }
+        safeReject(new Error('Code generation socket-idle timeout after 2 minutes. Try again.'));
       });
 
-      req.on('error', (err: any) => reject(err));
+      req.on('error', (err: any) => safeReject(err));
       req.write(payload);
       req.end();
     });

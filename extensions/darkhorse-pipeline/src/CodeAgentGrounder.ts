@@ -140,22 +140,36 @@ function detectLogging(corpus: string): boolean {
 
 function mcpGet(port: number, path: string, timeoutMs: number): Promise<any> {
   return new Promise((resolve, reject) => {
+    // Absolute hard timeout — Node's socket-idle timeout doesn't fire when
+    // bytes trickle in. setTimeout fires regardless. Cap = 2 * timeoutMs.
+    let settled = false;
+    const HARD_MS = timeoutMs * 2;
+    const safeResolve = (v: any) => { if (!settled) { settled = true; clearTimeout(hardTimer); resolve(v); } };
+    const safeReject  = (e: Error) => { if (!settled) { settled = true; clearTimeout(hardTimer); reject(e); } };
     const req = http.request(
       { hostname: '127.0.0.1', port, path, method: 'GET', timeout: timeoutMs },
       (res: any) => {
         let data = '';
         res.on('data', (chunk: any) => data += chunk);
-        res.on('end', () => { try { resolve(JSON.parse(data)); } catch (err) { reject(err); } });
+        res.on('end', () => { try { safeResolve(JSON.parse(data)); } catch (err) { safeReject(err as Error); } });
       }
     );
-    req.on('timeout', () => { req.destroy(); reject(new Error('mcp timeout')); });
-    req.on('error', reject);
+    const hardTimer = setTimeout(() => {
+      try { req.destroy(); } catch { /* ignore */ }
+      safeReject(new Error(`MCP GET ${path} hard-timeout after ${HARD_MS}ms`));
+    }, HARD_MS);
+    req.on('timeout', () => { try { req.destroy(); } catch { /* ignore */ } safeReject(new Error('mcp socket-idle timeout')); });
+    req.on('error', safeReject);
     req.end();
   });
 }
 
 function mcpPost(port: number, path: string, body: object, timeoutMs: number): Promise<any> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const HARD_MS = timeoutMs * 2;
+    const safeResolve = (v: any) => { if (!settled) { settled = true; clearTimeout(hardTimer); resolve(v); } };
+    const safeReject  = (e: Error) => { if (!settled) { settled = true; clearTimeout(hardTimer); reject(e); } };
     const payload = JSON.stringify(body);
     const req = http.request(
       {
@@ -165,11 +179,15 @@ function mcpPost(port: number, path: string, body: object, timeoutMs: number): P
       (res: any) => {
         let data = '';
         res.on('data', (chunk: any) => data += chunk);
-        res.on('end', () => { try { resolve(JSON.parse(data)); } catch (err) { reject(err); } });
+        res.on('end', () => { try { safeResolve(JSON.parse(data)); } catch (err) { safeReject(err as Error); } });
       }
     );
-    req.on('timeout', () => { req.destroy(); reject(new Error('mcp timeout')); });
-    req.on('error', reject);
+    const hardTimer = setTimeout(() => {
+      try { req.destroy(); } catch { /* ignore */ }
+      safeReject(new Error(`MCP POST ${path} hard-timeout after ${HARD_MS}ms`));
+    }, HARD_MS);
+    req.on('timeout', () => { try { req.destroy(); } catch { /* ignore */ } safeReject(new Error('mcp socket-idle timeout')); });
+    req.on('error', safeReject);
     req.write(payload);
     req.end();
   });
