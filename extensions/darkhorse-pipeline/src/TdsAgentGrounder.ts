@@ -46,9 +46,19 @@ export interface TdsGroundingItem {
     | 'get_cbo_pattern'
     | 'get_application_log_pattern'
     | 'get_fiori_pattern'
-    | 'get_form_pattern';
+    | 'get_form_pattern'
+    | 'enhancement_pattern';   // CPI-6 A8 — deterministic, no MCP
   body:    string;
 }
+
+/** CPI-6 A8 — Enhancement scenario classification. */
+export type EnhancementScenarioGuess =
+  | 'FIELD_LABEL_OVERRIDE'      // change field labels on standard transactions
+  | 'CUSTOM_FIELD_ADDITION'     // add a new field to standard master/transactional data
+  | 'SCREEN_BEHAVIOR'           // dynamic field visibility / mandatory / read-only
+  | 'TRANSACTION_VALIDATION'    // validation on save / before posting
+  | 'DETERMINATION_DEFAULT'     // auto-populate values from business rules
+  | 'PROCESS_EXTENSION';        // hook business logic into a standard process
 
 export interface TdsGroundingContext {
   ricefwType:      string;
@@ -56,15 +66,16 @@ export interface TdsGroundingContext {
   mcpUnavailable:  boolean;
   grounding:       TdsGroundingItem[];
   detected: {
-    sapTables:       string[];
-    isTransactional: boolean;
-    isAnalytical:    boolean;
-    needsCbo:        boolean;
-    needsLogging:    boolean;
-    rapScenario:     string | null;
-    cboScenario:     string | null;
-    fioriScenario:   FioriScenarioGuess | null;
-    formScenario:    FormScenarioGuess | null;
+    sapTables:           string[];
+    isTransactional:     boolean;
+    isAnalytical:        boolean;
+    needsCbo:            boolean;
+    needsLogging:        boolean;
+    rapScenario:         string | null;
+    cboScenario:         string | null;
+    fioriScenario:       FioriScenarioGuess | null;
+    formScenario:        FormScenarioGuess | null;
+    enhancementScenario: EnhancementScenarioGuess | null;   // CPI-6 A8
   };
 }
 
@@ -98,6 +109,126 @@ const RX_ANALYTICAL    = /\b(report|alv|analytical|dashboard|kpi|aggregate|drill
 const RX_DRAFT         = /\b(draft|autosave|in[-\s]?progress\s+edit|work\s+in\s+progress)\b/i;
 const RX_CBO_HINT      = /\b(custom\s+table|persistent\s+custom|store\s+custom|approval\s+status|audit\s+trail|ledger|business\s+object\s+for\s+(?:custom|new))\b/i;
 const RX_LOGGING       = /\b(log|logging|application\s+log|slg1|audit\s+trail|error\s+capture)\b/i;
+
+// CPI-6 A8 — Enhancement scenario detection. Runs only when the RICEFW
+// type is "Enhancement" (we don't want to mis-categorise a Report or
+// Interface as an Enhancement). Matches the FDS corpus against the
+// well-known patterns the Clean Core extensibility framework distinguishes.
+const ENH_PATTERNS: Array<{
+  scenario: EnhancementScenarioGuess;
+  rx:       RegExp;
+}> = [
+  // Field-label overrides on standard transactions / master data
+  {
+    scenario: 'FIELD_LABEL_OVERRIDE',
+    rx:       /\b(field\s+label|label\s+change|rename\s+field|relabel|short\s+text|column\s+heading|field\s+description)\b/i
+  },
+  // New custom field on standard objects (Customer / Material / Vendor / Sales Order / etc.)
+  {
+    scenario: 'CUSTOM_FIELD_ADDITION',
+    rx:       /\b(custom\s+field|new\s+field|additional\s+field|extension\s+field|z[-_]?field|append\s+structure|add\s+(?:a\s+)?field\s+to)\b/i
+  },
+  // Dynamic screen behavior (visible / hidden / mandatory / read-only)
+  {
+    scenario: 'SCREEN_BEHAVIOR',
+    rx:       /\b(hide\s+field|show\s+field|mandatory\s+field|required\s+field|read[-\s]?only|field\s+visibility|grey(ed)?\s+out|field\s+control)\b/i
+  },
+  // Validation hooks fired on save / before posting
+  {
+    scenario: 'TRANSACTION_VALIDATION',
+    rx:       /\b(validation|validate\s+(?:input|data|user)|check\s+(?:before|on)\s+save|prevent\s+save|reject\s+(?:save|post|create))\b/i
+  },
+  // Determinations / defaulting / auto-populate
+  {
+    scenario: 'DETERMINATION_DEFAULT',
+    rx:       /\b(auto[-\s]?populate|default\s+value|derive(?:d)?\s+from|determination|pre[-\s]?fill|auto[-\s]?fill|set\s+(?:the\s+)?(?:default|value))\b/i
+  },
+  // Generic hook into a standard business process
+  {
+    scenario: 'PROCESS_EXTENSION',
+    rx:       /\b(extend\s+(?:the\s+)?(?:standard|sap)|hook\s+into|append\s+logic|after\s+save|before\s+save|process\s+extension|side[-\s]?effect)\b/i
+  }
+];
+
+function detectEnhancementScenario(
+  corpus: string,
+  ricefwType: string
+): EnhancementScenarioGuess | null {
+  if ((ricefwType ?? '').trim().toLowerCase() !== 'enhancement') return null;
+  for (const p of ENH_PATTERNS) {
+    if (p.rx.test(corpus)) return p.scenario;
+  }
+  // Even a vague Enhancement BR should get the Clean Core steering. Default
+  // to PROCESS_EXTENSION so the developer sees the Key User Extensibility
+  // recommendation rather than a generic user-exit hallucination.
+  return 'PROCESS_EXTENSION';
+}
+
+function renderEnhancementPattern(scenario: EnhancementScenarioGuess): TdsGroundingItem {
+  const heading: Record<EnhancementScenarioGuess, string> = {
+    FIELD_LABEL_OVERRIDE:    'Enhancement scenario: Field-label override',
+    CUSTOM_FIELD_ADDITION:   'Enhancement scenario: Custom-field addition',
+    SCREEN_BEHAVIOR:         'Enhancement scenario: Dynamic screen behavior',
+    TRANSACTION_VALIDATION:  'Enhancement scenario: Transaction validation',
+    DETERMINATION_DEFAULT:   'Enhancement scenario: Determination / defaulting',
+    PROCESS_EXTENSION:       'Enhancement scenario: Standard-process extension'
+  };
+  const recommended: Record<EnhancementScenarioGuess, string[]> = {
+    FIELD_LABEL_OVERRIDE: [
+      'Clean Core first choice (Level A): SAP standard text customization in SPRO — for most field labels there is a customizing table you can adjust without any ABAP.',
+      'Second choice (Level A): SAP S/4HANA Fiori app "Manage Customer/Material/etc. — Field Labels" or the per-object "Configure UI" admin tool.',
+      'Third choice (Level B, only if the above does not cover the field): Key User Extensibility → Custom Fields and Logic (UI label override via the published BAdI for the field).',
+      'NEVER: classic user exit (USEREXIT_*), screen-modification module pool, or DDIC modification of standard data elements. Those break Clean Core, do not survive upgrades, and the post-generation verifier will flag them.'
+    ],
+    CUSTOM_FIELD_ADDITION: [
+      'Clean Core first choice (Level A): Key User Extensibility → Custom Fields and Logic (Fiori app). Creates an append structure and exposes the field through the released business contexts (CDS extensions, UI, OData, search, value help) automatically.',
+      'Second choice (Level A/B): Custom Business Object via Key User Extensibility when the field belongs to a new entity rather than an extension of standard.',
+      'Allowed only with explicit Level B justification: append structure + classic BAdI implementation, when the released business context does not yet cover the target table.',
+      'NEVER: direct DDIC modification of standard tables / structures. NEVER classic user exit screen mods to display the new field.'
+    ],
+    SCREEN_BEHAVIOR: [
+      'Clean Core first choice (Level A): SAP S/4HANA Fiori app field-control / "UI Adaptation at runtime" (drag-and-drop hide/show/mandatory).',
+      'Second choice (Level A): Custom Fields and Logic → Field Behavior BAdI for declarative rules.',
+      'Third choice (Level B): released BAdI implementation that returns the desired field-control state. Use the BAdI catalog to find the right released spot for the object you are extending.',
+      'NEVER: classic LOOP AT SCREEN / MODIFY SCREEN inside a user exit on a GUI dynpro. Those run on SAP GUI screens that no longer exist in the Fiori-first runtime.'
+    ],
+    TRANSACTION_VALIDATION: [
+      'Clean Core first choice (Level A): Key User Extensibility → Custom Fields and Logic, Business Add-In "Pre-Save" or "Validation" exit point.',
+      'Second choice (Level A): RAP behavior validation (define validation in BDEF) when the object is a custom business object or has a RAP-managed behavior pool.',
+      'Third choice (Level B): released BAdI implementation. Always use the BAdI catalog to confirm the spot is released.',
+      'NEVER: classic USEREXIT_SAVE_DOCUMENT_PREPARE / FORM-based exit. They are not part of the released ABAP-for-Cloud-Development scope.'
+    ],
+    DETERMINATION_DEFAULT: [
+      'Clean Core first choice (Level A): RAP determination (define determination on $update / $create) for custom business objects.',
+      'Second choice (Level A): Key User Extensibility → Custom Fields and Logic, "Default Value" exit.',
+      'Third choice (Level B): released BAdI implementation.',
+      'NEVER: classic ABAP user exit USEREXIT_MOVE_FIELD_TO_VBAK / FORM-based default routines. Those modify standard transaction state outside the released contract.'
+    ],
+    PROCESS_EXTENSION: [
+      'Clean Core first choice (Level A): RAP action / business event subscription if a released event exists for the trigger point.',
+      'Second choice (Level A): Key User Extensibility → Custom Fields and Logic, "Post-Save" or "Side-Effect" exit point.',
+      'Third choice (Level B): released BAdI implementation. The BAdI catalog (MCP) confirms whether the spot is released and what its interface looks like.',
+      'NEVER: classic SUBMIT / CALL TRANSACTION chain off a user exit. Those are forbidden in ABAP Cloud and create brittle inter-transaction dependencies.'
+    ]
+  };
+  const body =
+    `The BR/FDS for this Enhancement matches the "${scenario}" pattern. ` +
+    `Apply the Clean Core extensibility hierarchy in order — pick the FIRST ` +
+    `option that fits the requirement, and only fall back to the next when ` +
+    `the previous truly does not cover it:\n\n` +
+    recommended[scenario].map(s => `- ${s}`).join('\n') +
+    `\n\nThe abapObjectList you produce should reflect this choice. Examples:\n` +
+    `  - Configuration only:        no abapObjectList entries; emit a CONFIG row with the SPRO path.\n` +
+    `  - Key User Extensibility:    abapObjectList of object type DCLS / DDLX (annotation override) or a CFL_RULE descriptor row; NO PROG / CLAS / ENHC.\n` +
+    `  - BAdI implementation:       one ENHO (Enhancement Implementation) entry per BAdI, plus a CLAS for the implementing class. The BAdI name MUST be a released spot — confirm via the MCP BAdI catalog.\n` +
+    `  - RAP behavior:              BDEF + ZBP_I_<Entity> CLAS, only if the entity is custom (or the released BDEF exposes the right extension point).\n\n` +
+    `DO NOT produce classic user-exit programs (ZCUSTOMER_LABEL_EXIT-style PROG with FORM-based routines), MODULE statements on standard dynpros, or DDIC modifications. The post-generation Clean Core verifier flags those as Level B with this same recommendation block.`;
+  return {
+    heading: heading[scenario],
+    tool:    'enhancement_pattern',
+    body
+  };
+}
 
 function corpusFor(fds: FdsLike): string {
   const s = fds.sections ?? {};
@@ -232,15 +363,16 @@ export async function groundFdsForTds(
   const cboInfo      = detectCbo(corpus);
 
   const detected = {
-    sapTables:       detectSapTables(corpus),
-    isTransactional: scenarioInfo.isTransactional,
-    isAnalytical:    scenarioInfo.isAnalytical,
-    needsCbo:        cboInfo.needsCbo,
-    needsLogging:    RX_LOGGING.test(corpus),
-    rapScenario:     scenarioInfo.rapScenario,
-    cboScenario:     cboInfo.scenario,
-    fioriScenario:   detectFioriScenario(corpus, ricefwType),
-    formScenario:    detectFormScenario(corpus)
+    sapTables:           detectSapTables(corpus),
+    isTransactional:     scenarioInfo.isTransactional,
+    isAnalytical:        scenarioInfo.isAnalytical,
+    needsCbo:            cboInfo.needsCbo,
+    needsLogging:        RX_LOGGING.test(corpus),
+    rapScenario:         scenarioInfo.rapScenario,
+    cboScenario:         cboInfo.scenario,
+    fioriScenario:       detectFioriScenario(corpus, ricefwType),
+    formScenario:        detectFormScenario(corpus),
+    enhancementScenario: detectEnhancementScenario(corpus, ricefwType)
   };
 
   const ctx: TdsGroundingContext = {
@@ -251,13 +383,21 @@ export async function groundFdsForTds(
     detected
   };
 
+  // CPI-6 A8 — Enhancement-scenario grounding is deterministic, no MCP
+  // round-trip required. Push it first so it lands at the top of the
+  // prompt block where it has the most influence on the LLM's plan.
+  if (detected.enhancementScenario) {
+    ctx.grounding.push(renderEnhancementPattern(detected.enhancementScenario));
+  }
+
   const hasSomething =
     detected.sapTables.length > 0 ||
     detected.rapScenario !== null ||
     detected.needsCbo ||
     detected.needsLogging ||
     detected.fioriScenario !== null ||
-    detected.formScenario !== null;
+    detected.formScenario !== null ||
+    detected.enhancementScenario !== null;
   if (!hasSomething) return ctx;
 
   if (!(await isMcpUp(mcpPort))) {
@@ -441,15 +581,26 @@ function renderLog(res: any): TdsGroundingItem | null {
 // ---------------------------------------------------------------------------
 
 export function renderTdsGroundingForPrompt(ctx: TdsGroundingContext): string {
+  // Deterministic items (enhancement_pattern) ship regardless of MCP
+  // availability — they don't need retrieval. CPI-6 A8.
+  const deterministicTools = new Set(['enhancement_pattern']);
+  const deterministicItems = ctx.grounding.filter(g => deterministicTools.has(g.tool));
+
   if (ctx.mcpUnavailable) {
-    return [
+    const banner = [
       '## Grounded SAP knowledge for TDS object planning',
       '',
-      'The DarkHorse MCP server is currently unreachable. Generation is proceeding ',
-      'WITHOUT grounded knowledge. Apply Clean Core rules carefully — favor RAP ',
-      '(BDEF / DDLS / SRVD) over classic PROG / FUGR for transactional objects, and ',
-      'CBO pattern over Z-table + INSERT for custom persistent data.'
+      'The DarkHorse MCP server is currently unreachable. Retrieved-knowledge ',
+      'blocks (CDS view names, RAP / CBO / Fiori / Form patterns, SLG1) are ',
+      'omitted for this run. Apply Clean Core rules carefully — favor RAP ',
+      '(BDEF / DDLS / SRVD) over classic PROG / FUGR for transactional objects, ',
+      'and CBO pattern over Z-table + INSERT for custom persistent data.'
     ].join('\n');
+    if (deterministicItems.length === 0) return banner;
+    const blocks = deterministicItems.map(g =>
+      `### ${g.heading}\nSource: ${g.tool}\n\n${g.body}`
+    ).join('\n\n');
+    return `${banner}\n\nThe following deterministic Clean Core rules still apply:\n\n${blocks}`;
   }
   if (ctx.grounding.length === 0) {
     return '';

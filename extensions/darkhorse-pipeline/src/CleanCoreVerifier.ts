@@ -51,7 +51,7 @@ export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D';
 export type Verdict        = 'pass' | 'warn' | 'fail' | 'skipped';
 
 export interface CleanCoreFinding {
-  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf' | 'test' | 'btp';
+  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf' | 'test' | 'btp' | 'enhancement';
   reference:    string;          // raw token found in the source
   exists:       boolean | null;  // null if the tool doesn't return existence
   level:        CleanCoreLevel | null;
@@ -243,6 +243,9 @@ interface ExtractedReferences {
   /** CPI-6 A6 — ABAP Cloud / BTP forbidden statements. Key is the finding's
    *  stable identifier (matches BTP_FINDINGS[].key). */
   btp: Map<string, number>;
+  /** CPI-6 A8 — classic-enhancement antipatterns (FORM USEREXIT, MODIFY
+   *  SCREEN, CALL CUSTOMER-FUNCTION, implicit ENHANCEMENT-POINT). */
+  enhancement: Map<string, number>;
 }
 
 function tally(map: Map<string, number>, key: string): void {
@@ -260,6 +263,52 @@ const RX_BEHAVIOR_IMPL = /\bCLASS\s+ZBP_I_[A-Z][A-Z0-9_]*\s+(?:DEFINITION|IMPLEM
 const RX_CLASS_DEFINITION  = /\bCLASS\s+[A-Z_][A-Z0-9_]*\s+DEFINITION\b/gi;
 const RX_METHOD_BODY       = /\bMETHOD\s+[A-Z_][A-Z0-9_~]*\s*\.[\s\S]*?\bENDMETHOD\b/gi;
 const RX_FOR_TESTING_BLOCK = /\bCLASS\s+[A-Z_][A-Z0-9_]*\s+DEFINITION\s+(?:[^.]*\b)?FOR\s+TESTING\b/i;
+
+// CPI-6 A8 — classic-enhancement antipatterns. These are patterns generated
+// by an LLM that misread the Enhancement requirement as a license to drop
+// into 1990s ABAP. Each is Level B with a Key User Extensibility / BAdI
+// alternative named. The alternatives mirror the TDS-side enhancement
+// scenario grounding so the messaging is consistent across stages.
+const ENHANCEMENT_FINDINGS: Array<{
+  key:         string;
+  rx:          RegExp;
+  description: string;
+  alternative: string;
+}> = [
+  {
+    key:         'FORM USEREXIT_*',
+    // FORM <name>. ... ENDFORM. where the form name starts with userexit_
+    rx:          /\bFORM\s+(?:USEREXIT_|user_exit_)[A-Z0-9_]+/gi,
+    description: 'FORM-based user exit (USEREXIT_<name>). This is the legacy enhancement pattern pre-S/4HANA. Not part of ABAP-for-Cloud-Development scope. Upgrade-fragile and not Clean Core.',
+    alternative: 'Replace with an implementation of a released Business Add-In (ENHO) or Key User Extensibility → Custom Fields and Logic. Use the MCP BAdI catalog to find the matching released spot.'
+  },
+  {
+    key:         'PERFORM USEREXIT_*',
+    rx:          /\bPERFORM\s+(?:USEREXIT_|user_exit_)[A-Z0-9_]+/gi,
+    description: 'PERFORM call into a USEREXIT_* form. This drags the legacy enhancement framework into the codebase even when the called form sits in standard include.',
+    alternative: 'Drop the PERFORM. The replacement is a BAdI implementation that the SAP standard already calls at the right point in the process.'
+  },
+  {
+    key:         'MODIFY SCREEN',
+    rx:          /\bMODIFY\s+SCREEN\b/gi,
+    description: 'Classic LOOP AT SCREEN / MODIFY SCREEN dynamic field control. Runs only on SAP GUI dynpros, not on Fiori / Web Dynpro. Forbidden in ABAP-for-Cloud-Development.',
+    alternative: 'Use Key User Extensibility → Field Behavior BAdI (declarative visibility / mandatory / read-only rules), or a released field-control BAdI when the entity has one.'
+  },
+  {
+    key:         'CALL CUSTOMER-FUNCTION',
+    rx:          /\bCALL\s+CUSTOMER-FUNCTION\b/gi,
+    description: 'Classic customer-function exit call (SAP\'s pre-BAdI enhancement primitive). Not released for cloud development and obsolete on S/4HANA.',
+    alternative: 'Replace with a Business Add-In implementation via Enhancement Implementation (ENHO).'
+  },
+  {
+    key:         'ENHANCEMENT-POINT (implicit)',
+    // Match implicit enhancement points: `ENHANCEMENT-POINT <id> SPOTS <spot> STATIC.`
+    // Implicit spots are particularly fragile across upgrades.
+    rx:          /\bENHANCEMENT-POINT\s+[A-Z0-9_]+\s+SPOTS\s+[A-Z0-9_]+\s+STATIC\b/gi,
+    description: 'Implicit ENHANCEMENT-POINT (STATIC). Not part of the released enhancement contract — upgrade-fragile and routinely deprecated by SAP.',
+    alternative: 'Find the released explicit Enhancement Spot for the same business need (MCP BAdI catalog), or move the requirement to Custom Fields and Logic.'
+  }
+];
 
 // CPI-6 A6 — ABAP Cloud / BTP forbidden statements. Each pattern flags a
 // statement that is not part of the released ABAP-for-Cloud-Development
@@ -330,7 +379,8 @@ function extractReferences(code: string): ExtractedReferences {
     perf:           new Map<PerfFindingKey, number>(),
     missingTests:   false,
     methodCount:    0,
-    btp:            new Map<string, number>()
+    btp:            new Map<string, number>(),
+    enhancement:    new Map<string, number>()
   };
 
   for (const m of code.matchAll(RX_USEREXIT)) {
@@ -395,6 +445,16 @@ function extractReferences(code: string): ExtractedReferences {
     const count = (code.match(entry.rx) ?? []).length;
     if (count > 0) {
       out.btp.set(entry.key, count);
+    }
+  }
+
+  // CPI-6 A8 — classic-enhancement antipatterns (FORM USEREXIT, MODIFY SCREEN,
+  // CALL CUSTOMER-FUNCTION, implicit ENHANCEMENT-POINT). Each counted
+  // separately so the finding card shows where the impact concentrates.
+  for (const entry of ENHANCEMENT_FINDINGS) {
+    const count = (code.match(entry.rx) ?? []).length;
+    if (count > 0) {
+      out.enhancement.set(entry.key, count);
     }
   }
 
@@ -587,7 +647,8 @@ export async function verifyGeneratedCode(
     refs.authChecks.size === 0 &&
     refs.perf.size === 0 &&
     !refs.missingTests &&
-    refs.btp.size === 0;
+    refs.btp.size === 0 &&
+    refs.enhancement.size === 0;
 
   if (nothingFound) {
     return {
@@ -609,7 +670,7 @@ export async function verifyGeneratedCode(
     return {
       verdict:        'skipped',
       scannedAt,
-      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size + refs.perf.size + (refs.missingTests ? 1 : 0) + refs.btp.size,
+      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size + refs.perf.size + (refs.missingTests ? 1 : 0) + refs.btp.size + refs.enhancement.size,
       countsByLevel:  emptyCounts(),
       findings:       [],
       mcpUnavailable: true,
@@ -788,6 +849,26 @@ export async function verifyGeneratedCode(
         `aspect pfcg_auth '${authObj}' ... ; }`,
       occurrences:  count,
       acknowledged: ackFor(`AUTHORITY-CHECK ${authObj}`)
+    });
+  }
+
+  // ---- CPI-6 A8: classic-enhancement antipatterns --------------------------
+  // Each match becomes a Level B finding pointing at the Clean Core
+  // replacement (released BAdI implementation, Key User Extensibility,
+  // declarative field control). These are the patterns the LLM tends to
+  // fall back to when given a vague "Enhancement" requirement.
+  for (const [key, count] of refs.enhancement.entries()) {
+    const entry = ENHANCEMENT_FINDINGS.find(e => e.key === key);
+    if (!entry) continue;
+    findings.push({
+      category:     'enhancement',
+      reference:    key,
+      exists:       true,
+      level:        'B',
+      description:  entry.description,
+      alternative:  entry.alternative,
+      occurrences:  count,
+      acknowledged: ackFor(key)
     });
   }
 

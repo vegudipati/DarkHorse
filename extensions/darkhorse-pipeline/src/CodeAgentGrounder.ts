@@ -457,6 +457,41 @@ function detectLayerRoleGrounding(obj: AbapObject): GroundingItem | null {
     };
   }
 
+  if (type === 'ENHO' || type === 'ENHS' || type === 'ENHC') {
+    return {
+      heading: 'Clean Core layer role: Enhancement Implementation (ENHO / ENHS / ENHC)',
+      tool:    'layer_role',
+      body:
+        `You are generating an enhancement implementation (${name}). STRICT rules:\n\n` +
+        `  - This MUST be an implementation of a RELEASED Business Add-In (BAdI) ` +
+        `or Enhancement Spot. Confirm the target BAdI's release status against ` +
+        `the MCP BAdI catalog before emitting code. If the BAdI is not released, ` +
+        `STOP and surface the gap in keyLogic — do NOT proceed with a classic ` +
+        `user-exit fallback.\n` +
+        `  - Shape: ABAP class that IMPLEMENTS the BAdI interface, registered ` +
+        `via Enhancement Implementation (ENHO). Class signature:\n` +
+        `      CLASS lcl_${name.toLowerCase()} DEFINITION\n` +
+        `        PUBLIC FINAL\n` +
+        `        CREATE PUBLIC.\n` +
+        `        PUBLIC SECTION.\n` +
+        `          INTERFACES <released_badi_interface>.\n` +
+        `      ENDCLASS.\n\n` +
+        `  - DO NOT emit any of these classic-enhancement patterns:\n` +
+        `      - USEREXIT_* (FORM-based user exits — pre-S/4 legacy)\n` +
+        `      - INCLUDE programs that PERFORM USEREXIT_<name>\n` +
+        `      - MODULE statements on standard dynpros (LOOP AT SCREEN / MODIFY SCREEN)\n` +
+        `      - SUBMIT or CALL TRANSACTION chains off the BAdI implementation\n` +
+        `      - Direct DDIC modifications to standard data elements / structures\n` +
+        `  - For field-label overrides specifically, prefer Key User Extensibility ` +
+        `(Custom Fields and Logic → Field Label override BAdI) over a code-based ` +
+        `solution. The post-generation verifier flags classic user-exit code with ` +
+        `the Key User Extensibility alternative.\n` +
+        `  - Authorization: rely on the released BAdI's own authorization contract; ` +
+        `do not emit AUTHORITY-CHECK in the BAdI implementation unless the BAdI ` +
+        `documentation explicitly requires it.`
+    };
+  }
+
   if (type === 'DCLS' && /^ZI_[A-Z][A-Z0-9_]*$/.test(name)) {
     const stem = name.replace(/^ZI_/, '');
     return {
