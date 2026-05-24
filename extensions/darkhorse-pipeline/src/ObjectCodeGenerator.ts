@@ -60,6 +60,35 @@ export class ObjectCodeGenerator {
     const startIndex = state.currentObjectIndex;
     for (let i = startIndex; i < objects.length; i++) {
       const obj = objects[i];
+
+      // Reusable-objects marketplace — before invoking the LLM, check whether
+      // an accepted object with this same name + type already exists in the
+      // cross-pipeline catalog. When the developer picks Reuse, the cached
+      // code is written directly (no LLM call, no preview) and the object is
+      // marked accepted in state. Selective regen explicitly bypasses this
+      // (it has its own entry point and the developer there is asking for a
+      // fresh generation).
+      const reuseOutcome = await ObjectCodeGenerator.tryReuseFromCatalog(
+        i, obj, stateManager, tracker
+      );
+      if (reuseOutcome === 'reused') {
+        await stateManager.markObjectComplete(i, true);
+        await stateManager.setState(stateManager.getState()!);
+        tracker.refresh();
+        vscode.window.showInformationMessage(
+          `DarkHorse: ${obj.objectName} reused from catalog ✓`
+        );
+        continue;
+      }
+      if (reuseOutcome === 'skipped') {
+        vscode.window.showInformationMessage(
+          `DarkHorse: Code generation paused at object ${i + 1}. ` +
+          'Use "Resume Pipeline" to continue.'
+        );
+        return;
+      }
+      // 'generate-fresh' or 'no-match' — fall through to normal LLM path.
+
       const accepted = await ObjectCodeGenerator.generateObject(
         i, obj, tdsDoc, stateManager, tracker
       );
@@ -156,6 +185,111 @@ export class ObjectCodeGenerator {
         ? `DarkHorse: ${obj.objectName} regenerated ✓`
         : `DarkHorse: ${obj.objectName} rejected — keep editing as needed.`
     );
+  }
+
+  /**
+   * Reusable-objects marketplace — offer reuse of a previously accepted
+   * object with the same name + type. Returns:
+   *   'reused'         — developer chose reuse; cached code written to the
+   *                      abapGit folder + state.generatedCode updated.
+   *                      Caller should markObjectComplete(i, true).
+   *   'generate-fresh' — developer chose to regenerate fresh; caller should
+   *                      proceed with the normal LLM path.
+   *   'skipped'        — developer cancelled; caller should treat like the
+   *                      panel-closed outcome (return from the loop).
+   *   'no-match'       — catalog has no matching entry; caller proceeds.
+   */
+  private static async tryReuseFromCatalog(
+    index: number,
+    obj: AbapObject,
+    stateManager: PipelineStateManager,
+    tracker: PipelineTracker
+  ): Promise<'reused' | 'generate-fresh' | 'skipped' | 'no-match'> {
+    const { ReusableCatalog } = require('./ReusableCatalog');
+    const catalog = new ReusableCatalog(stateManager.getContext());
+    const hits = catalog.find(obj.objectName, obj.objectType);
+    if (!hits || hits.length === 0) return 'no-match';
+
+    // Pick the most recent hit by default; if multiple variants exist, offer
+    // a QuickPick to disambiguate. Each entry shows source pipeline +
+    // accepted-at + usage count so the developer can choose deliberately.
+    let entry = hits[0]!;
+    if (hits.length > 1) {
+      type VariantItem = vscode.QuickPickItem & { entry: any };
+      const items: VariantItem[] = hits.map((h: any) => ({
+        label:       `${h.objectName} — from ${h.metadata.sourcePipelineTitle}`,
+        description: `accepted ${h.metadata.acceptedAt.split('T')[0]} · used ${h.usageCount ?? 0}×`,
+        detail:      h.description,
+        entry:       h
+      }));
+      const picked = await vscode.window.showQuickPick(items, {
+        title:       `DarkHorse: ${hits.length} reusable variants of ${obj.objectName} (${obj.objectType})`,
+        placeHolder: 'Pick the variant to reuse, or press Esc to skip the catalog and generate fresh.'
+      });
+      if (!picked) return 'generate-fresh';   // Esc -> proceed with LLM
+      entry = picked.entry;
+    } else {
+      // Single hit -> simple three-way prompt.
+      const choice = await vscode.window.showInformationMessage(
+        `DarkHorse: ${obj.objectName} (${obj.objectType}) already exists in the catalog ` +
+          `from pipeline "${entry.metadata.sourcePipelineTitle}" (accepted ` +
+          `${entry.metadata.acceptedAt.split('T')[0]}, used ${entry.usageCount ?? 0}× so far). ` +
+          `Reuse, generate fresh, or skip this object?`,
+        { modal: false },
+        'Reuse from catalog',
+        'Generate fresh',
+        'Skip this object'
+      );
+      if (choice === 'Reuse from catalog') {
+        // fall through
+      } else if (choice === 'Generate fresh') {
+        return 'generate-fresh';
+      } else if (choice === 'Skip this object') {
+        return 'skipped';
+      } else {
+        // dialog dismissed without choice -> safe default = generate fresh
+        return 'generate-fresh';
+      }
+    }
+
+    // ---- Apply reuse ------------------------------------------------------
+    // Mirror what the Accept handler does: write the cached code to the
+    // abapGit folder, update the audit-relevant state, bump catalog usage.
+    const config = vscode.workspace.getConfiguration();
+    const outputFolder = stateManager.getPipelineOutputFolder();
+    if (outputFolder) {
+      try {
+        const { saveAbapGit } = require('./AbapGitWriter');
+        const packageName = config.get<string>('darkhorse.pipeline.defaultPackage', '') || '$TMP';
+        saveAbapGit({
+          objectName:   obj.objectName,
+          objectType:   obj.objectType,
+          description:  obj.description ?? obj.objectName,
+          code:         entry.generatedCode,
+          outputFolder,
+          packageName
+        });
+      } catch (err: any) {
+        console.warn(`[DarkHorse] tryReuseFromCatalog write failed: ${err?.message ?? err}`);
+      }
+    }
+
+    // Persist the reused code on the AbapObject so the TDS refresh + report
+    // pick it up like any other accepted output.
+    const live = stateManager.getState();
+    if (live) {
+      live.abapObjects[index].generatedCode = entry.generatedCode;
+      await stateManager.setState(live);
+    }
+    await catalog.bumpUsage(entry.id);
+
+    // Best-effort: refresh the TDS .docx + generation report.
+    try {
+      const { refreshTdsAndReport } = require('./TdsRefresher');
+      await refreshTdsAndReport(stateManager);
+    } catch { /* non-fatal */ }
+    tracker.refresh();
+    return 'reused';
   }
 
   /**
@@ -464,6 +598,31 @@ export class ObjectCodeGenerator {
             await refreshTdsAndReport(stateManager);
           } catch (err: any) {
             console.warn(`[DarkHorse] TdsRefresher invocation failed: ${err?.message ?? err}`);
+          }
+
+          // Add this accepted object to the cross-pipeline Reusable Catalog
+          // so future pipelines can offer reuse instead of regenerating.
+          // De-duplicated by (name, type, code) — re-accepting the same code
+          // returns the existing entry id.
+          try {
+            const { ReusableCatalog } = require('./ReusableCatalog');
+            const catalog = new ReusableCatalog(stateManager.getContext());
+            const activeState = stateManager.getState();
+            await catalog.add({
+              objectName:    obj.objectName,
+              objectType:    obj.objectType,
+              description:   obj.description ?? '',
+              keyLogic:      obj.keyLogic ?? [],
+              dependencies:  obj.dependencies ?? [],
+              generatedCode: currentCode,
+              metadata: {
+                sourcePipelineId:    activeState?.pipelineId    ?? '',
+                sourcePipelineTitle: activeState?.title         ?? '',
+                acceptedAt:          new Date().toISOString()
+              }
+            });
+          } catch (err: any) {
+            console.warn(`[DarkHorse] ReusableCatalog.add failed: ${err?.message ?? err}`);
           }
 
           resolve(true);

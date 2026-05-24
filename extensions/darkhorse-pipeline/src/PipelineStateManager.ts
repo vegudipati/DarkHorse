@@ -130,6 +130,12 @@ export class PipelineStateManager {
     this.context = context;
   }
 
+  /** Exposes the extension context so modules that need globalState access
+   *  (ReusableCatalog, future cross-pipeline registries) can share it. */
+  public getContext(): vscode.ExtensionContext {
+    return this.context;
+  }
+
   // --------------------------------------------------------------------
   // Backwards-compatible getState / setState — operate on the ACTIVE pipeline
   // --------------------------------------------------------------------

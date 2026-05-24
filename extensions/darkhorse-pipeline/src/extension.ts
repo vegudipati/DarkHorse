@@ -140,6 +140,80 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Reusable-objects marketplace — browse the cross-pipeline catalog. The
+  // QuickPick shows every accepted object across all pipelines with source
+  // and usage; selecting an entry opens a webview-free read-only doc with
+  // the cached code so the developer can review.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.browseReusable', async () => {
+      const { ReusableCatalog } = require('./ReusableCatalog');
+      const catalog = new ReusableCatalog(context);
+      type BrowseItem = vscode.QuickPickItem & { id: string };
+      const items: BrowseItem[] = catalog.list().map((s: any) => ({
+        label:       `${s.objectName}`,
+        description: `${s.objectType} · from ${s.sourcePipelineTitle}`,
+        detail:      `accepted ${s.acceptedAt.split('T')[0]} · used ${s.usageCount}× · ${(s.description || '').slice(0, 80)}`,
+        id:          s.id
+      }));
+      if (items.length === 0) {
+        vscode.window.showInformationMessage(
+          'DarkHorse: Reusable catalog is empty. Accept an object in any pipeline to add the first entry.'
+        );
+        return;
+      }
+      const pick = await vscode.window.showQuickPick(items, {
+        title:       `DarkHorse: ${items.length} reusable object(s) in the catalog`,
+        placeHolder: 'Pick an entry to view its accepted code',
+        matchOnDescription: true,
+        matchOnDetail:      true
+      });
+      if (!pick) return;
+      const entry = catalog.getById(pick.id);
+      if (!entry) return;
+      const doc = await vscode.workspace.openTextDocument({
+        content:  entry.generatedCode,
+        language: 'abap'
+      });
+      await vscode.window.showTextDocument(doc, { preview: true });
+    })
+  );
+
+  // Reusable-objects marketplace — remove an entry from the catalog. Output
+  // files on disk (in any pipeline's abapGit folder) are untouched; only the
+  // extension's reuse-offer registry is affected.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('darkhorse.pipeline.removeReusable', async () => {
+      const { ReusableCatalog } = require('./ReusableCatalog');
+      const catalog = new ReusableCatalog(context);
+      const entries = catalog.list();
+      if (entries.length === 0) {
+        vscode.window.showInformationMessage('DarkHorse: Reusable catalog is empty — nothing to remove.');
+        return;
+      }
+      type RemoveItem = vscode.QuickPickItem & { id: string; name: string };
+      const items: RemoveItem[] = entries.map((s: any) => ({
+        label:       s.objectName,
+        description: `${s.objectType} · from ${s.sourcePipelineTitle}`,
+        detail:      `accepted ${s.acceptedAt.split('T')[0]} · used ${s.usageCount}×`,
+        id:          s.id,
+        name:        s.objectName
+      }));
+      const pick = await vscode.window.showQuickPick(items, {
+        title:       'DarkHorse: remove entry from reusable catalog',
+        placeHolder: 'Pick the entry to remove'
+      });
+      if (!pick) return;
+      const confirm = await vscode.window.showWarningMessage(
+        `Remove "${pick.name}" from the reusable catalog?`,
+        { modal: true, detail: 'Only the catalog entry is removed. The actual source files in any pipeline\'s output folder stay intact.' },
+        'Remove'
+      );
+      if (confirm !== 'Remove') return;
+      await catalog.remove(pick.id);
+      vscode.window.showInformationMessage(`DarkHorse: removed "${pick.name}" from the reusable catalog.`);
+    })
+  );
+
   // Selective regen — re-generate ONE specific object without re-running
   // the whole pipeline. Prompts the developer to pick which object via
   // QuickPick, then runs the standard preview/accept flow for just that

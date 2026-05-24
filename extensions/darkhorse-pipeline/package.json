@@ -2,7 +2,7 @@
   "name": "darkhorse-pipeline",
   "displayName": "DarkHorse Pipeline",
   "description": "BR → FDS → TDS → Code pipeline for SAP RICEFW development",
-  "version": "0.7.28",
+  "version": "0.7.29",
   "publisher": "deloitte-darkhorse",
   "engines": {
     "vscode": "^1.85.0"
@@ -64,6 +64,14 @@
       {
         "command": "darkhorse.pipeline.deletePipeline",
         "title": "DarkHorse: Delete Pipeline"
+      },
+      {
+        "command": "darkhorse.pipeline.browseReusable",
+        "title": "DarkHorse: Browse Reusable Objects"
+      },
+      {
+        "command": "darkhorse.pipeline.removeReusable",
+        "title": "DarkHorse: Remove from Reusable Catalog"
       },
       {
         "command": "darkhorse.pipeline.captureCorrections",
