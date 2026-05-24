@@ -47,7 +47,7 @@ export interface GroundingItem {
   /** Free-form heading shown in the system prompt block. */
   heading:  string;
   /** Tool that produced this item. */
-  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern' | 'sibling_wrapper' | 'layer_role' | 'hana_pushdown' | 'cloud_readiness';
+  tool:     'get_cds_view' | 'get_eml_syntax' | 'get_rap_pattern' | 'get_application_log_pattern' | 'get_fiori_pattern' | 'get_form_pattern' | 'sibling_wrapper' | 'layer_role' | 'hana_pushdown' | 'cloud_readiness' | 'fds_anchors';
   /** Pre-rendered markdown-ish text to inject into the prompt. */
   body:     string;
 }
@@ -566,7 +566,12 @@ export async function groundObjectForGeneration(
    *  identifies wrapper views (ZI_<TABLE> DDLS) and emits a grounding item
    *  steering the LLM toward those wrappers instead of direct table access.
    *  Structurally compatible with AbapObject AND the raw TDS sections entry. */
-  siblings: ReadonlyArray<SiblingRef> = []
+  siblings: ReadonlyArray<SiblingRef> = [],
+  /** FDS corpus for verbatim anchor extraction (CPI-6 A9). When provided,
+   *  the grounder emits an fds_anchors block listing quoted identifiers,
+   *  transaction codes, SAP tables, BAdI names, and field-label phrases the
+   *  LLM must use as-is — reduces hallucination of generic identifiers. */
+  fdsCorpus: string = ''
 ): Promise<GroundingContext> {
 
   const scannedAt = new Date().toISOString();
@@ -611,6 +616,34 @@ export async function groundObjectForGeneration(
   const cloudItem = detectCloudReadinessGrounding(obj);
   if (cloudItem) {
     ctx.grounding.push(cloudItem);
+  }
+
+  // CPI-6 A9 — FDS verbatim-anchor grounding. Deterministic, no MCP. Pulls
+  // quoted SAP IDs, transactions, tables, BAdIs, and field-label phrases
+  // from the FDS so the LLM uses the FDS's actual identifiers instead of
+  // hallucinating generic ones.
+  if (fdsCorpus && fdsCorpus.length > 0) {
+    try {
+      const { extractFdsAnchors, renderFdsAnchorsForPrompt } = require('./FdsAnchorExtractor');
+      const anchors = extractFdsAnchors(fdsCorpus);
+      if (anchors.hasAnchors) {
+        ctx.grounding.push({
+          heading: 'FDS verbatim anchors (use these strings unchanged)',
+          tool:    'fds_anchors',
+          body:
+            `The FDS for this deliverable explicitly named the following SAP ` +
+            `identifiers, transactions, tables, BAdI spots, and field labels. ` +
+            `Use them VERBATIM in your generated code (matching case where ` +
+            `case is shown, matching spaces in multi-word labels). Do not ` +
+            `invent generic equivalents like "Customer Field" when the FDS ` +
+            `says "Sales Channel".\n\n` +
+            renderFdsAnchorsForPrompt(anchors)
+        });
+      }
+    } catch (err: any) {
+      // Anchor extraction is opportunistic — failure must not block grounding.
+      console.warn(`[DarkHorse] FDS anchor extraction failed: ${err?.message ?? err}`);
+    }
   }
 
   // CPI-6 B4 — sibling wrapper grounding runs deterministically before MCP.
@@ -879,7 +912,7 @@ function inferEntityHint(obj: AbapObject, sapTables: string[]): string {
 export function renderGroundingForPrompt(ctx: GroundingContext): string {
   // Deterministic items (layer_role, sibling_wrapper) ship regardless of MCP
   // availability — they're computed from TDS metadata, not retrieved.
-  const deterministicTools = new Set(['layer_role', 'sibling_wrapper', 'hana_pushdown', 'cloud_readiness']);
+  const deterministicTools = new Set(['layer_role', 'sibling_wrapper', 'hana_pushdown', 'cloud_readiness', 'fds_anchors']);
   const deterministicItems = ctx.grounding.filter(g => deterministicTools.has(g.tool));
   const retrievedItems     = ctx.grounding.filter(g => !deterministicTools.has(g.tool));
 

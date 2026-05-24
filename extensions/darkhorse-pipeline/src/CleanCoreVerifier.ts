@@ -51,7 +51,7 @@ export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D';
 export type Verdict        = 'pass' | 'warn' | 'fail' | 'skipped';
 
 export interface CleanCoreFinding {
-  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf' | 'test' | 'btp' | 'enhancement';
+  category:     'exit' | 'table' | 'bapi' | 'ui' | 'auth' | 'perf' | 'test' | 'btp' | 'enhancement' | 'completeness';
   reference:    string;          // raw token found in the source
   exists:       boolean | null;  // null if the tool doesn't return existence
   level:        CleanCoreLevel | null;
@@ -246,6 +246,9 @@ interface ExtractedReferences {
   /** CPI-6 A8 — classic-enhancement antipatterns (FORM USEREXIT, MODIFY
    *  SCREEN, CALL CUSTOMER-FUNCTION, implicit ENHANCEMENT-POINT). */
   enhancement: Map<string, number>;
+  /** CPI-6 A10 — completeness antipatterns (empty METHOD bodies, TODO/
+   *  FIXME markers, DarkHorse auto-detect stubs, placeholder comments). */
+  completeness: Map<string, number>;
 }
 
 function tally(map: Map<string, number>, key: string): void {
@@ -263,6 +266,49 @@ const RX_BEHAVIOR_IMPL = /\bCLASS\s+ZBP_I_[A-Z][A-Z0-9_]*\s+(?:DEFINITION|IMPLEM
 const RX_CLASS_DEFINITION  = /\bCLASS\s+[A-Z_][A-Z0-9_]*\s+DEFINITION\b/gi;
 const RX_METHOD_BODY       = /\bMETHOD\s+[A-Z_][A-Z0-9_~]*\s*\.[\s\S]*?\bENDMETHOD\b/gi;
 const RX_FOR_TESTING_BLOCK = /\bCLASS\s+[A-Z_][A-Z0-9_]*\s+DEFINITION\s+(?:[^.]*\b)?FOR\s+TESTING\b/i;
+
+// CPI-6 A10 — completeness antipatterns. The LLM sometimes ships code that
+// LOOKS like a real implementation but contains empty method bodies, TODO/
+// FIXME markers, or DarkHorse's own "could not auto-detect" stubs. These
+// don't fail the build but they will fail at runtime / on activation. The
+// verifier flags them so the developer doesn't accept a stub by accident.
+const COMPLETENESS_FINDINGS: Array<{
+  key:         string;
+  rx:          RegExp;
+  description: string;
+  alternative: string;
+}> = [
+  {
+    key:         'Empty METHOD body',
+    /** METHOD <name>. ... ENDMETHOD. with only whitespace / comments inside.
+     *  We anchor on METHOD <name>. followed by optional comment lines and
+     *  immediate ENDMETHOD. Conservative regex — only matches truly empty. */
+    rx:          /\bMETHOD\s+[A-Z_][A-Z0-9_~]*\s*\.\s*(?:\*[^\n]*\n|"[^\n]*\n|\s)*ENDMETHOD\b/gi,
+    description: 'Method declared with empty body. This compiles but will silently no-op at runtime — the BAdI / interface contract is unmet.',
+    alternative: 'Implement the method body. If the method legitimately has no work to do, add a single-line comment "* intentionally empty: <why>" so the verifier knows the omission is deliberate.'
+  },
+  {
+    key:         'TODO / FIXME marker',
+    rx:          /\b(?:TODO|FIXME|XXX|HACK)\b/g,
+    description: 'TODO / FIXME / XXX / HACK marker in shipped code. These markers indicate the implementation is incomplete; reviewers and the SAP system have no way to distinguish "left intentionally" from "forgotten".',
+    alternative: 'Either complete the work the marker describes, or convert the marker into a documented design decision in the TDS rather than a runtime comment.'
+  },
+  {
+    key:         'DarkHorse auto-detect stub',
+    /** Marker that the ZWrapperGenerator (or any DarkHorse component) gives
+     *  up and leaves a placeholder. Should never reach production. */
+    rx:          /\bDarkHorse\s+could\s+not\s+auto[-\s]?detect\b/gi,
+    description: 'DarkHorse stub marker present. A code generator gave up and left a placeholder — typically a CDS field list it couldn\'t infer from the consuming program.',
+    alternative: 'Replace the stub with the actual content. For CDS field lists, list the fields the consuming program reads. For BAdI implementations, complete the method bodies.'
+  },
+  {
+    key:         'Placeholder comment',
+    /** Catches "<implement>", "<replace>", "add logic here", "implement me". */
+    rx:          /<\s*(?:implement|replace|fill\s+in|add\s+logic)\s*>|implement\s+me\b|add\s+(?:logic|code)\s+here\b/gi,
+    description: 'Placeholder comment / angle-bracket marker indicating an unimplemented section.',
+    alternative: 'Replace with the actual implementation or remove the placeholder if the section is no longer needed.'
+  }
+];
 
 // CPI-6 A8 — classic-enhancement antipatterns. These are patterns generated
 // by an LLM that misread the Enhancement requirement as a license to drop
@@ -380,7 +426,8 @@ function extractReferences(code: string): ExtractedReferences {
     missingTests:   false,
     methodCount:    0,
     btp:            new Map<string, number>(),
-    enhancement:    new Map<string, number>()
+    enhancement:    new Map<string, number>(),
+    completeness:   new Map<string, number>()
   };
 
   for (const m of code.matchAll(RX_USEREXIT)) {
@@ -455,6 +502,14 @@ function extractReferences(code: string): ExtractedReferences {
     const count = (code.match(entry.rx) ?? []).length;
     if (count > 0) {
       out.enhancement.set(entry.key, count);
+    }
+  }
+
+  // CPI-6 A10 — completeness antipatterns (empty methods, TODOs, stubs).
+  for (const entry of COMPLETENESS_FINDINGS) {
+    const count = (code.match(entry.rx) ?? []).length;
+    if (count > 0) {
+      out.completeness.set(entry.key, count);
     }
   }
 
@@ -648,7 +703,8 @@ export async function verifyGeneratedCode(
     refs.perf.size === 0 &&
     !refs.missingTests &&
     refs.btp.size === 0 &&
-    refs.enhancement.size === 0;
+    refs.enhancement.size === 0 &&
+    refs.completeness.size === 0;
 
   if (nothingFound) {
     return {
@@ -670,7 +726,7 @@ export async function verifyGeneratedCode(
     return {
       verdict:        'skipped',
       scannedAt,
-      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size + refs.perf.size + (refs.missingTests ? 1 : 0) + refs.btp.size + refs.enhancement.size,
+      totalFindings:  refs.exits.size + refs.tables.size + refs.bapis.size + refs.uis.size + refs.exposeZi.size + refs.interfaceAnn.size + refs.authChecks.size + refs.perf.size + (refs.missingTests ? 1 : 0) + refs.btp.size + refs.enhancement.size + refs.completeness.size,
       countsByLevel:  emptyCounts(),
       findings:       [],
       mcpUnavailable: true,
@@ -849,6 +905,24 @@ export async function verifyGeneratedCode(
         `aspect pfcg_auth '${authObj}' ... ; }`,
       occurrences:  count,
       acknowledged: ackFor(`AUTHORITY-CHECK ${authObj}`)
+    });
+  }
+
+  // ---- CPI-6 A10: completeness antipatterns -------------------------------
+  // Empty methods, TODOs, stubs, placeholder markers. Each Level B so the
+  // developer sees them in the panel before accepting.
+  for (const [key, count] of refs.completeness.entries()) {
+    const entry = COMPLETENESS_FINDINGS.find(e => e.key === key);
+    if (!entry) continue;
+    findings.push({
+      category:     'completeness',
+      reference:    key,
+      exists:       true,
+      level:        'B',
+      description:  entry.description,
+      alternative:  entry.alternative,
+      occurrences:  count,
+      acknowledged: ackFor(key)
     });
   }
 

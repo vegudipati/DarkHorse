@@ -311,9 +311,14 @@ export class ObjectCodeGenerator {
 
     const pipelineTitle = stateManager.getState()?.title ?? 'DarkHorse Pipeline';
 
+    // CPI-6 A9 — pull the FDS corpus once per object so the grounder can
+    // extract verbatim anchors. Returns an empty string when no FDS is
+    // available (e.g. selective regen on a partial pipeline).
+    const fdsCorpus = ObjectCodeGenerator.extractFdsCorpus(stateManager);
+
     // First-pass generation with no acknowledgements.
     const first = await ObjectCodeGenerator.generateOnce(
-      obj, tdsDoc, index, proxyPort, totalObjects, [], pipelineTitle
+      obj, tdsDoc, index, proxyPort, totalObjects, [], pipelineTitle, fdsCorpus
     );
     if (!first.code) {
       return false;
@@ -325,11 +330,38 @@ export class ObjectCodeGenerator {
       obj, first.code, stateManager, first.report, first.review, first.autoFix,
       async (acks: string[]) => {
         return ObjectCodeGenerator.generateOnce(
-          obj, tdsDoc, index, proxyPort, totalObjects, acks, pipelineTitle
+          obj, tdsDoc, index, proxyPort, totalObjects, acks, pipelineTitle, fdsCorpus
         );
       }
     );
     return accepted;
+  }
+
+  /** Pull the FDS corpus from state.fdsContent. Returns an empty string when
+   *  no FDS is saved (e.g. fresh pipeline or selective regen on a partial
+   *  state). FDS content is stored as JSON.stringify(FdsDocument). */
+  private static extractFdsCorpus(stateManager: PipelineStateManager): string {
+    const state = stateManager.getState();
+    const raw = state?.fdsContent;
+    if (!raw) return '';
+    try {
+      const fds = JSON.parse(raw);
+      const s = fds?.sections ?? {};
+      return [
+        fds.title ?? '',
+        s.businessBackground     ?? '',
+        s.processOverview        ?? '',
+        ...((s.functionalRequirements ?? []) as Array<{ description?: string }>).map(r => r.description ?? ''),
+        s.inputOutputSpec        ?? '',
+        ...(s.businessRules      ?? []),
+        ...(s.errorHandling      ?? []),
+        s.authorization          ?? '',
+        s.reportingRequirements  ?? '',
+        s.uiDesign               ?? ''
+      ].join('\n');
+    } catch {
+      return '';
+    }
   }
 
   /**
@@ -344,7 +376,11 @@ export class ObjectCodeGenerator {
     proxyPort: number,
     totalObjects: number,
     acknowledgements: readonly string[],
-    pipelineTitle: string
+    pipelineTitle: string,
+    /** CPI-6 A9 — FDS corpus for verbatim-anchor extraction. Pass empty string
+     *  to skip anchor grounding (e.g. when called from selective regen and
+     *  the FDS is not yet available in state). */
+    fdsCorpus: string = ''
   ): Promise<{ code: string; report?: CleanCoreReport; review?: ReviewReport; autoFix?: AutoFixSummary }> {
 
     const ackSuffix = acknowledgements.length > 0
@@ -368,7 +404,10 @@ export class ObjectCodeGenerator {
         // sibling wrapper views (ZI_<TABLE>) and steer the LLM away from
         // direct SELECT FROM <TABLE>.
         const siblings = tdsDoc.sections.abapObjectList ?? [];
-        groundingContext = await groundObjectForGeneration(obj, resolveMcpPort(), siblings);
+        // CPI-6 A9 — fdsCorpus threaded through from generateObject. When
+        // non-empty, the grounder extracts verbatim identifiers (txns,
+        // tables, BAdIs, field labels) the LLM must reuse unchanged.
+        groundingContext = await groundObjectForGeneration(obj, resolveMcpPort(), siblings, fdsCorpus);
       } catch (err: any) {
         console.error('DarkHorse: CodeAgentGrounder threw:', err?.message ?? err);
       }
