@@ -258,7 +258,15 @@ class HelpPortalFetcher {
                         continue;
                     // Extract CDS view content.
                     const extract = await page.evaluate(extractViewFromPage, contentSel, '');
-                    const viewName = deriveViewName(extract.pageTitle, url);
+                    // Derive view name from page content; fall back to URL GUID so every
+                    // entry in the catalog has a unique, stable key even when the page
+                    // title is a generic section heading.
+                    const rawName = deriveViewName(extract.pageTitle, url);
+                    const urlGuid = (url.match(/\/([a-f0-9]{20,})\.html$/i)?.[1] ?? '').toUpperCase();
+                    const GENERIC = 'VIRTUAL DATA MODEL AND CDS VIEWS';
+                    const viewName = (rawName.toUpperCase() === GENERIC || rawName === 'UNKNOWN')
+                        ? (urlGuid || rawName)
+                        : rawName;
                     const doc = this.toDocumentFromExtract({
                         viewName,
                         pageTitle: extract.pageTitle || viewName,
@@ -421,9 +429,60 @@ function extractViewFromPage(contentSelector, viewName) {
     const root = document.querySelector(contentSelector) ?? document.body;
     if (!root)
         return { pageTitle: document.title || viewName, fields: [], bodyText: '' };
-    const pageTitle = (root.querySelector('h1')?.textContent?.trim()) ||
-        (document.querySelector('h1')?.textContent?.trim()) ||
-        (document.title || viewName);
+    // Find the most-specific title available. Priority:
+    //   1. Breadcrumb last item (the current page's specific name)
+    //   2. Any h2/h3 inside the content that looks like a technical name
+    //   3. document.title (SPA may set it to "ViewName | SAP Help Portal")
+    //   4. h1 (usually the section title on help.sap.com, least specific)
+    function extractBreadcrumbLast() {
+        const selectors = [
+            'nav[aria-label*="breadcrumb"] li:last-child',
+            'ol[class*="breadcrumb"] li:last-child',
+            '[class*="breadcrumb"] li:last-child',
+            '[class*="Breadcrumb"] li:last-child',
+            'nav li:last-child'
+        ];
+        for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            const t = el?.textContent?.trim();
+            if (t && t.length > 0 && t.length < 120)
+                return t;
+        }
+        return '';
+    }
+    function extractTechnicalHeading() {
+        // Look for h2/h3 that contains an ABAP-style name (e.g. I_ViewName, C_ViewName)
+        const headings = Array.from(root.querySelectorAll('h1, h2, h3, h4'));
+        for (const h of headings) {
+            const t = (h.textContent ?? '').trim();
+            if (/\b[A-Z][A-Z0-9]*_[A-Za-z][A-Za-z0-9]+/.test(t) && t.length < 120)
+                return t;
+        }
+        return '';
+    }
+    function extractCodeName() {
+        // A <code> or monospace element near the top of the page often holds the technical name.
+        const codes = Array.from(root.querySelectorAll('code, .code, pre'));
+        for (const c of codes.slice(0, 10)) {
+            const t = (c.textContent ?? '').trim();
+            if (/^[A-Z][A-Z0-9]*_[A-Za-z][A-Za-z0-9]+$/.test(t))
+                return t;
+        }
+        return '';
+    }
+    const breadcrumbLast = extractBreadcrumbLast();
+    const technicalHeading = extractTechnicalHeading();
+    const codeName = extractCodeName();
+    const documentTitle = document.title ?? '';
+    const h1Text = (root.querySelector('h1') ?? document.querySelector('h1'))?.textContent?.trim() ?? '';
+    const pageTitle = codeName ||
+        technicalHeading ||
+        breadcrumbLast ||
+        (documentTitle.includes('|') ? documentTitle.split('|')[0].trim() : '') ||
+        (documentTitle.includes('-') ? documentTitle.split('-')[0].trim() : '') ||
+        h1Text ||
+        documentTitle ||
+        viewName;
     // Collect candidate tables in document order.
     const tables = Array.from(root.querySelectorAll('table'));
     let chosen = null;
