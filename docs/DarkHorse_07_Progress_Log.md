@@ -3,19 +3,19 @@
 > Running log of shipped work and pipeline. Update whenever we ship or change what's queued.
 
 **Last updated:** 2026-05-26
-**Current version:** v0.7.35 (extension), MCP field-catalog wiring committed at HEAD
-**Branch state:** pushed to `origin/main` through 2026-05-25; HelpPortalFetcher commit pending push
+**Current version:** v0.7.37 (ingest)
+**Branch state:** clean, pushed to `origin/main`
 
 ---
 
 ## In Progress
 
-- **EDMX live run** — api.sap.com XSUAA auth in progress; user setting up BTP trial for client credentials. URL pattern confirmed: `catalog.svc/APIContent.APIs('<SVC>')/$value?type=EDMX&attachment=true`.
+- **EDMX live run** — EDMX binary download still requires XSUAA auth (APIKey unlocks catalog list but not `/$value` download). BTP trial path or bearer token still needed.
 
 ## Pipeline (Not Started)
 - **LearningPortalFetcher** — lowest priority.
 - **Sprint 7 — Agent Marketplace** — per `docs/DarkHorse_06_CPI6_RAG_MCP.md` §Sprint 7.
-- **Push commits to `origin/main`** when ready (currently 2 commits ahead).
+- **help-portal-cds re-crawl** — current 501-page crawl has GUID-based viewNames, not ABAP technical names. Needs a re-crawl targeting per-view detail pages where ABAP names appear in breadcrumbs.
 
 ---
 
@@ -87,6 +87,8 @@ Spec: `docs/DarkHorse_06_CPI6_RAG_MCP.md`.
 | 2026-05-25 | **Committed (`c9c3e31`):** MCP-side providers + `darkhorse-ingest refresh` CLI subcommand. **Committed (`511075e`):** 24 MB of vendored SAP cloudification JSON snapshot. |
 | 2026-05-26 | **HelpPortalFetcher + CDS field catalog committed.** New puppeteer-core scraper for help.sap.com CDS reference pages. New `CdsFieldCatalogProvider` exposes per-view field arrays. `get_cds_view` tool now returns `fieldsDetail[]`. CodeAgentGrounder + TdsAgentGrounder render field tables in their prompt blocks. |
 | 2026-05-26 | **SapApiHubEdmxFetcher committed.** Bulk field-metadata via direct `$metadata` download — curated 25-service SD/MM/FI/PP list (`DEFAULT_SERVICE_NAMES`), no catalog discovery (api.sap.com OData catalog endpoint returns SPA HTML). Auth support: `APIKey` / `Bearer` / `Cookie` headers. Diagnose mode fetches one service + prints full response for auth iteration. Env vars: `DARKHORSE_API_HUB_API_KEY`, `DARKHORSE_API_HUB_BEARER`, `DARKHORSE_API_HUB_COOKIE`, `DARKHORSE_API_HUB_EDMX_DIAGNOSE`. |
+| 2026-05-26 | **SapApiHubSearchFetcher committed (v0.7.36).** Headless-Chrome scraper for all 9 api.sap.com search tabs (APIs, CDS Views, Integrations, Events, VPUC, Build, Process Blueprints, Analytics, Data Products). Link-href extraction robust to SPA class-name churn. Requires session auth — superseded by catalog API approach for APIs/Packages. |
+| 2026-05-26 | **SapApiHubCatalogFetcher committed (v0.7.37).** No browser required — pages through `APIContent.APIs` (5,230) and `ContentPackages` (2,100) via OData catalog API + APIKey. Full 7,330-document catalog fetched in 33s; snapshot committed to `fixtures/api-hub-catalog.json` for instant offline replay. Fields include ServiceCode, State, Deprecated, Successors, BusinessObjects per API and Vendor, BusinessProcess, Products, CertifiedBySap per package. |
 
 ---
 
