@@ -128,10 +128,13 @@ function selectBackends(snapshotPath?: string): SelectedBackends {
 // Argv parsing — tiny, since we only have two commands.
 // ---------------------------------------------------------------------------
 
+type RefreshSource = 'cloudification' | 'all';
+
 interface ParsedArgs {
-  command:      'ingest' | 'verify' | 'help';
-  source?:      SourceKey;
-  snapshot?:    string;
+  command:        'ingest' | 'verify' | 'refresh' | 'help';
+  source?:        SourceKey;
+  snapshot?:      string;
+  refreshSource?: RefreshSource;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -141,8 +144,8 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   const command = args[0];
-  if (command !== 'ingest' && command !== 'verify') {
-    throw new Error(`Unknown command "${command}". Try: ingest | verify | help`);
+  if (command !== 'ingest' && command !== 'verify' && command !== 'refresh') {
+    throw new Error(`Unknown command "${command}". Try: ingest | verify | refresh | help`);
   }
 
   const out: ParsedArgs = { command };
@@ -151,8 +154,12 @@ function parseArgs(argv: string[]): ParsedArgs {
     const a = args[i]!;
     if (a === '--snapshot') {
       out.snapshot = args[++i];
+    } else if (a === '--source') {
+      out.refreshSource = args[++i] as RefreshSource;
     } else if (!a.startsWith('--') && command === 'ingest' && !out.source) {
       out.source = a as SourceKey;
+    } else if (!a.startsWith('--') && command === 'refresh' && !out.refreshSource) {
+      out.refreshSource = a as RefreshSource;
     } else {
       throw new Error(`Unexpected argument "${a}".`);
     }
@@ -160,6 +167,9 @@ function parseArgs(argv: string[]): ParsedArgs {
 
   if (command === 'ingest' && !out.source) {
     throw new Error('ingest: source argument required, e.g. `ingest sap-api-hub`');
+  }
+  if (command === 'refresh' && !out.refreshSource) {
+    out.refreshSource = 'all';   // default to refreshing every external source we know
   }
   return out;
 }
@@ -272,6 +282,144 @@ async function runVerify(snapshotPath?: string): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// refresh — download canonical external data sources to fixtures/
+//
+// Currently supports:
+//   cloudification — SAP/abap-atc-cr-cv-s4hc cloudification JSONs (~24 MB).
+//                    Updated by SAP roughly weekly. Used by the MCP server's
+//                    CloudificationCatalogProvider.
+//
+// Future sources (architecture-center live, sap-api-hub live, help.sap.com)
+// will plug in here once their fetchers are pinned.
+// ---------------------------------------------------------------------------
+
+interface CloudificationFileSpec {
+  filename:  string;
+  url:       string;
+  /** Top-level array key inside the JSON. */
+  arrayKey:  'objectReleaseInfo' | 'objectClassifications';
+}
+
+const CLOUDIFICATION_BASE_URL =
+  process.env.DARKHORSE_CLOUDIFICATION_BASE_URL ??
+  'https://raw.githubusercontent.com/SAP/abap-atc-cr-cv-s4hc/main/src';
+
+const CLOUDIFICATION_FILES: CloudificationFileSpec[] = [
+  {
+    filename: 'objectReleaseInfoLatest.json',
+    url:      `${CLOUDIFICATION_BASE_URL}/objectReleaseInfoLatest.json`,
+    arrayKey: 'objectReleaseInfo'
+  },
+  {
+    filename: 'objectReleaseInfo_PCELatest.json',
+    url:      `${CLOUDIFICATION_BASE_URL}/objectReleaseInfo_PCELatest.json`,
+    arrayKey: 'objectReleaseInfo'
+  },
+  {
+    filename: 'objectClassifications_SAP.json',
+    url:      `${CLOUDIFICATION_BASE_URL}/objectClassifications_SAP.json`,
+    arrayKey: 'objectClassifications'
+  }
+];
+
+interface RefreshFileResult {
+  filename:        string;
+  url:             string;
+  bytesDownloaded: number;
+  countBefore:     number | null;
+  countAfter:      number;
+  delta:           number | null;
+  durationMs:      number;
+}
+
+async function runRefresh(refreshSource: RefreshSource): Promise<void> {
+  const fs = require('fs') as typeof import('fs');
+  const path = require('path') as typeof import('path');
+
+  if (refreshSource !== 'cloudification' && refreshSource !== 'all') {
+    throw new Error(`Unknown refresh source "${refreshSource}". Known: cloudification | all`);
+  }
+
+  // __dirname is dist/ at runtime → walk up to package root → fixtures/cloudification.
+  const outDir = path.resolve(__dirname, '..', 'fixtures', 'cloudification');
+  fs.mkdirSync(outDir, { recursive: true });
+
+  const results: RefreshFileResult[] = [];
+
+  for (const spec of CLOUDIFICATION_FILES) {
+    const target = path.join(outDir, spec.filename);
+
+    // Count entries in the existing file (if any) so we can report a delta.
+    let countBefore: number | null = null;
+    if (fs.existsSync(target)) {
+      try {
+        const before = JSON.parse(fs.readFileSync(target, 'utf-8'));
+        countBefore = Array.isArray(before[spec.arrayKey]) ? before[spec.arrayKey].length : null;
+      } catch {
+        // Existing file is unreadable — treat as "no previous count".
+        countBefore = null;
+      }
+    }
+
+    const start = Date.now();
+    process.stdout.write(`refresh: GET ${spec.url}\n`);
+
+    const res = await fetch(spec.url);
+    if (!res.ok) {
+      throw new Error(`refresh: ${spec.filename} → HTTP ${res.status} ${res.statusText}`);
+    }
+    const text = await res.text();
+
+    // Validate JSON before clobbering existing file so a corrupt response
+    // doesn't wipe out a previously good snapshot.
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err: any) {
+      throw new Error(`refresh: ${spec.filename} returned invalid JSON — ${err.message}`);
+    }
+    const list = parsed[spec.arrayKey];
+    if (!Array.isArray(list)) {
+      throw new Error(`refresh: ${spec.filename} missing expected "${spec.arrayKey}" array`);
+    }
+
+    fs.writeFileSync(target, text);
+
+    const countAfter = list.length;
+    results.push({
+      filename:        spec.filename,
+      url:             spec.url,
+      bytesDownloaded: Buffer.byteLength(text),
+      countBefore,
+      countAfter,
+      delta:           countBefore == null ? null : countAfter - countBefore,
+      durationMs:      Date.now() - start
+    });
+  }
+
+  const totalAfter = results.reduce((acc, r) => acc + r.countAfter, 0);
+  const totalBefore = results.reduce((acc, r) => acc + (r.countBefore ?? 0), 0);
+  const totalBytes  = results.reduce((acc, r) => acc + r.bytesDownloaded, 0);
+
+  process.stdout.write(JSON.stringify({
+    refreshSource,
+    outDir,
+    files:       results,
+    summary: {
+      filesRefreshed: results.length,
+      totalEntriesBefore: totalBefore,
+      totalEntriesAfter:  totalAfter,
+      totalDelta:         totalAfter - totalBefore,
+      totalBytes
+    },
+    nextStep:
+      'Files written. If your git status shows the JSON files changed, review with ' +
+      '`git diff --stat services/darkhorse-ingest/fixtures/cloudification/` and commit with ' +
+      'a message like "data: refresh SAP cloudification snapshot YYYY-MM-DD".'
+  }, null, 2) + '\n');
+}
+
 function printHelp(): void {
   process.stdout.write(
 `darkhorse-ingest — Sprint 2 RAG ingestion pipeline.
@@ -286,6 +434,12 @@ Commands:
   verify [--snapshot <path>]
       Probe the index with known SAP references and report pass/fail.
       If no snapshot is given, an in-memory ingest runs first.
+
+  refresh [<source> | --source <source>]
+      Re-download canonical external data sources to fixtures/.
+      Sources: cloudification (SAP/abap-atc-cr-cv-s4hc JSONs) | all (default).
+      Prints an entry-count delta so you can decide whether to commit.
+      Override the base URL via DARKHORSE_CLOUDIFICATION_BASE_URL.
 
   help
       Show this message.
@@ -325,6 +479,9 @@ async function main(): Promise<void> {
       return;
     case 'verify':
       await runVerify(parsed.snapshot);
+      return;
+    case 'refresh':
+      await runRefresh(parsed.refreshSource!);
       return;
   }
 }

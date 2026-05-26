@@ -89,8 +89,8 @@ function parseArgs(argv) {
         return { command: 'help' };
     }
     const command = args[0];
-    if (command !== 'ingest' && command !== 'verify') {
-        throw new Error(`Unknown command "${command}". Try: ingest | verify | help`);
+    if (command !== 'ingest' && command !== 'verify' && command !== 'refresh') {
+        throw new Error(`Unknown command "${command}". Try: ingest | verify | refresh | help`);
     }
     const out = { command };
     for (let i = 1; i < args.length; i++) {
@@ -98,8 +98,14 @@ function parseArgs(argv) {
         if (a === '--snapshot') {
             out.snapshot = args[++i];
         }
+        else if (a === '--source') {
+            out.refreshSource = args[++i];
+        }
         else if (!a.startsWith('--') && command === 'ingest' && !out.source) {
             out.source = a;
+        }
+        else if (!a.startsWith('--') && command === 'refresh' && !out.refreshSource) {
+            out.refreshSource = a;
         }
         else {
             throw new Error(`Unexpected argument "${a}".`);
@@ -107,6 +113,9 @@ function parseArgs(argv) {
     }
     if (command === 'ingest' && !out.source) {
         throw new Error('ingest: source argument required, e.g. `ingest sap-api-hub`');
+    }
+    if (command === 'refresh' && !out.refreshSource) {
+        out.refreshSource = 'all'; // default to refreshing every external source we know
     }
     return out;
 }
@@ -205,6 +214,100 @@ async function runVerify(snapshotPath) {
         process.exitCode = 1;
     }
 }
+const CLOUDIFICATION_BASE_URL = process.env.DARKHORSE_CLOUDIFICATION_BASE_URL ??
+    'https://raw.githubusercontent.com/SAP/abap-atc-cr-cv-s4hc/main/src';
+const CLOUDIFICATION_FILES = [
+    {
+        filename: 'objectReleaseInfoLatest.json',
+        url: `${CLOUDIFICATION_BASE_URL}/objectReleaseInfoLatest.json`,
+        arrayKey: 'objectReleaseInfo'
+    },
+    {
+        filename: 'objectReleaseInfo_PCELatest.json',
+        url: `${CLOUDIFICATION_BASE_URL}/objectReleaseInfo_PCELatest.json`,
+        arrayKey: 'objectReleaseInfo'
+    },
+    {
+        filename: 'objectClassifications_SAP.json',
+        url: `${CLOUDIFICATION_BASE_URL}/objectClassifications_SAP.json`,
+        arrayKey: 'objectClassifications'
+    }
+];
+async function runRefresh(refreshSource) {
+    const fs = require('fs');
+    const path = require('path');
+    if (refreshSource !== 'cloudification' && refreshSource !== 'all') {
+        throw new Error(`Unknown refresh source "${refreshSource}". Known: cloudification | all`);
+    }
+    // __dirname is dist/ at runtime → walk up to package root → fixtures/cloudification.
+    const outDir = path.resolve(__dirname, '..', 'fixtures', 'cloudification');
+    fs.mkdirSync(outDir, { recursive: true });
+    const results = [];
+    for (const spec of CLOUDIFICATION_FILES) {
+        const target = path.join(outDir, spec.filename);
+        // Count entries in the existing file (if any) so we can report a delta.
+        let countBefore = null;
+        if (fs.existsSync(target)) {
+            try {
+                const before = JSON.parse(fs.readFileSync(target, 'utf-8'));
+                countBefore = Array.isArray(before[spec.arrayKey]) ? before[spec.arrayKey].length : null;
+            }
+            catch {
+                // Existing file is unreadable — treat as "no previous count".
+                countBefore = null;
+            }
+        }
+        const start = Date.now();
+        process.stdout.write(`refresh: GET ${spec.url}\n`);
+        const res = await fetch(spec.url);
+        if (!res.ok) {
+            throw new Error(`refresh: ${spec.filename} → HTTP ${res.status} ${res.statusText}`);
+        }
+        const text = await res.text();
+        // Validate JSON before clobbering existing file so a corrupt response
+        // doesn't wipe out a previously good snapshot.
+        let parsed;
+        try {
+            parsed = JSON.parse(text);
+        }
+        catch (err) {
+            throw new Error(`refresh: ${spec.filename} returned invalid JSON — ${err.message}`);
+        }
+        const list = parsed[spec.arrayKey];
+        if (!Array.isArray(list)) {
+            throw new Error(`refresh: ${spec.filename} missing expected "${spec.arrayKey}" array`);
+        }
+        fs.writeFileSync(target, text);
+        const countAfter = list.length;
+        results.push({
+            filename: spec.filename,
+            url: spec.url,
+            bytesDownloaded: Buffer.byteLength(text),
+            countBefore,
+            countAfter,
+            delta: countBefore == null ? null : countAfter - countBefore,
+            durationMs: Date.now() - start
+        });
+    }
+    const totalAfter = results.reduce((acc, r) => acc + r.countAfter, 0);
+    const totalBefore = results.reduce((acc, r) => acc + (r.countBefore ?? 0), 0);
+    const totalBytes = results.reduce((acc, r) => acc + r.bytesDownloaded, 0);
+    process.stdout.write(JSON.stringify({
+        refreshSource,
+        outDir,
+        files: results,
+        summary: {
+            filesRefreshed: results.length,
+            totalEntriesBefore: totalBefore,
+            totalEntriesAfter: totalAfter,
+            totalDelta: totalAfter - totalBefore,
+            totalBytes
+        },
+        nextStep: 'Files written. If your git status shows the JSON files changed, review with ' +
+            '`git diff --stat services/darkhorse-ingest/fixtures/cloudification/` and commit with ' +
+            'a message like "data: refresh SAP cloudification snapshot YYYY-MM-DD".'
+    }, null, 2) + '\n');
+}
 function printHelp() {
     process.stdout.write(`darkhorse-ingest — Sprint 2 RAG ingestion pipeline.
 
@@ -218,6 +321,12 @@ Commands:
   verify [--snapshot <path>]
       Probe the index with known SAP references and report pass/fail.
       If no snapshot is given, an in-memory ingest runs first.
+
+  refresh [<source> | --source <source>]
+      Re-download canonical external data sources to fixtures/.
+      Sources: cloudification (SAP/abap-atc-cr-cv-s4hc JSONs) | all (default).
+      Prints an entry-count delta so you can decide whether to commit.
+      Override the base URL via DARKHORSE_CLOUDIFICATION_BASE_URL.
 
   help
       Show this message.
@@ -255,6 +364,9 @@ async function main() {
             return;
         case 'verify':
             await runVerify(parsed.snapshot);
+            return;
+        case 'refresh':
+            await runRefresh(parsed.refreshSource);
             return;
     }
 }

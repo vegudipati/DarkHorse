@@ -41,6 +41,8 @@ const GetFioriPattern_1 = require("./tools/GetFioriPattern");
 const GetFormPattern_1 = require("./tools/GetFormPattern");
 const AcknowledgeCatalog_1 = require("./tools/AcknowledgeCatalog");
 const StaticCatalogProvider_1 = require("./src/providers/StaticCatalogProvider");
+const CloudificationCatalogProvider_1 = require("./src/providers/CloudificationCatalogProvider");
+const TerminalStubProvider_1 = require("./src/providers/TerminalStubProvider");
 const AzureSearchKnowledgeProvider_1 = require("./src/providers/AzureSearchKnowledgeProvider");
 const CompositeKnowledgeProvider_1 = require("./src/providers/CompositeKnowledgeProvider");
 // ---------------------------------------------------------------------------
@@ -59,23 +61,37 @@ function buildKnowledgeProvider() {
     const searchEndpoint = process.env.AZURE_SEARCH_ENDPOINT;
     const searchKey = process.env.AZURE_SEARCH_KEY;
     const indexName = process.env.DARKHORSE_RAG_INDEX_NAME ?? 'darkhorse-sap-knowledge-v1';
+    // Provider chain (first non-null wins):
+    //   1. Static curated catalog  — small, hand-tuned, rich descriptions +
+    //                                hallucination guards (USEREXIT_ATP_QUANTITY,
+    //                                BADI_VBAK_CHECK, etc.).
+    //   2. SAP Cloudification      — ~80K entries straight from SAP's official
+    //                                cloudification repository. Authoritative.
+    //   3. Azure AI Search         — optional, only if AZURE_SEARCH_* env vars set.
+    //                                Adds semantic search over ingested docs.
+    //   4. TerminalStub            — final fallback. Returns heuristic verdicts
+    //                                for checkCleanCoreLevel based on naming
+    //                                conventions, and "not found" stubs for
+    //                                verify_badi / verify_exit.
     const staticProvider = new StaticCatalogProvider_1.StaticCatalogProvider();
+    const cloudificationProvider = new CloudificationCatalogProvider_1.CloudificationCatalogProvider({ verbose: true });
+    const terminalProvider = new TerminalStubProvider_1.TerminalStubProvider();
+    const chain = [staticProvider, cloudificationProvider];
+    const reasons = ['static curated catalog', 'SAP Cloudification Repository'];
     if (searchEndpoint && searchKey) {
-        const azureProvider = new AzureSearchKnowledgeProvider_1.AzureSearchKnowledgeProvider({
+        chain.push(new AzureSearchKnowledgeProvider_1.AzureSearchKnowledgeProvider({
             endpoint: searchEndpoint,
             apiKey: searchKey,
             indexName
-        });
-        return {
-            provider: new CompositeKnowledgeProvider_1.CompositeKnowledgeProvider([azureProvider, staticProvider]),
-            staticProvider,
-            reason: `composite: Azure AI Search (${indexName}) → static catalog`
-        };
+        }));
+        reasons.push(`Azure AI Search (${indexName})`);
     }
+    chain.push(terminalProvider);
+    reasons.push('terminal heuristic fallback');
     return {
-        provider: staticProvider,
+        provider: new CompositeKnowledgeProvider_1.CompositeKnowledgeProvider(chain),
         staticProvider,
-        reason: 'static catalog only — AZURE_SEARCH_ENDPOINT/KEY not set'
+        reason: `composite: ${reasons.join(' → ')}`
     };
 }
 const TOOL_DESCRIPTORS = [
