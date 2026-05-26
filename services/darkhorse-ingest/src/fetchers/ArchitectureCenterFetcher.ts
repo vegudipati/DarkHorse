@@ -52,8 +52,16 @@ declare const document: any;
 export interface ArchitectureCenterFetcherOptions {
   live?:           boolean;
 
-  /** URLs to render. Required when live=true. Each must point at a
-   *  /docs/ref-arch/<id> page. */
+  /** Auto-discover all ref-arch URLs from the site's sitemap.xml before
+   *  scraping. When true, the urls[] list is used as a fallback seed in case
+   *  sitemap discovery returns zero results. Default false. */
+  discoverUrls?:   boolean;
+
+  /** Override the sitemap URL. Default: https://architecture.learning.sap.com/sitemap.xml */
+  sitemapUrl?:     string;
+
+  /** Seed URL list. When discoverUrls=true these are merged with sitemap
+   *  results (deduped). When discoverUrls=false, required for live mode. */
   urls?:           string[];
 
   /** Override fixture path for tests. */
@@ -68,6 +76,9 @@ export interface ArchitectureCenterFetcherOptions {
 
   /** Per-page timeout in ms. Default 30s. */
   pageTimeoutMs?:  number;
+
+  /** Timeout in ms for the sitemap HTTP fetch. Default 15s. */
+  sitemapTimeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,13 +148,31 @@ export class ArchitectureCenterFetcher implements IFetcher {
   // -------------------------------------------------------------------
 
   private async fetchLive(): Promise<IngestDocument[]> {
-    if (!this.options.urls || this.options.urls.length === 0) {
-      throw new Error('ArchitectureCenterFetcher: live=true requires urls[] in options.');
-    }
-
     const browserInfo = discoverBrowser(this.options.chromePath);
     const contentSel  = this.options.contentSelector ?? 'article, main, [class*="docMainContainer"]';
     const timeoutMs   = this.options.pageTimeoutMs ?? 30_000;
+
+    // Build the URL list — sitemap discovery + seed merge.
+    let urls: string[];
+    if (this.options.discoverUrls) {
+      const discovered = await this.discoverFromSitemap();
+      const seed = this.options.urls ?? [];
+      const merged = new Set<string>([...discovered, ...seed]);
+      urls = Array.from(merged);
+      process.stderr.write(
+        `[ArchitectureCenterFetcher] Sitemap: ${discovered.length} ref-arch URLs discovered; ` +
+        `${urls.length} total after merging seed.\n`
+      );
+    } else {
+      urls = this.options.urls ?? [];
+    }
+
+    if (urls.length === 0) {
+      throw new Error(
+        'ArchitectureCenterFetcher: no URLs to scrape. ' +
+        'Set discoverUrls=true or provide urls[] in options.'
+      );
+    }
 
     // Lazy import puppeteer-core so the seed-fixture path doesn't pay the cost.
     const puppeteer = require('puppeteer-core') as typeof import('puppeteer-core');
@@ -157,7 +186,7 @@ export class ArchitectureCenterFetcher implements IFetcher {
     const docs: IngestDocument[] = [];
     try {
       const fetchedAt = new Date().toISOString();
-      for (const url of this.options.urls) {
+      for (const url of urls) {
         const page = await browser.newPage();
         try {
           await page.goto(url, { waitUntil: 'networkidle2', timeout: timeoutMs });
@@ -190,6 +219,52 @@ export class ArchitectureCenterFetcher implements IFetcher {
       await browser.close();
     }
     return docs;
+  }
+
+  // -------------------------------------------------------------------
+  // Sitemap discovery — plain HTTP, no headless browser needed.
+  // Fetches sitemap.xml and extracts all /docs/ref-arch/* loc entries.
+  // -------------------------------------------------------------------
+
+  private async discoverFromSitemap(): Promise<string[]> {
+    const sitemapUrl = this.options.sitemapUrl
+      ?? 'https://architecture.learning.sap.com/sitemap.xml';
+    const timeoutMs  = this.options.sitemapTimeoutMs ?? 15_000;
+
+    process.stderr.write(`[ArchitectureCenterFetcher] Fetching sitemap: ${sitemapUrl}\n`);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let xml: string;
+    try {
+      const res = await fetch(sitemapUrl, {
+        signal:  controller.signal,
+        headers: { 'User-Agent': 'DarkHorse-Ingest/1.0', 'Accept': 'application/xml, text/xml, */*' }
+      });
+      if (!res.ok) {
+        process.stderr.write(
+          `[ArchitectureCenterFetcher] Sitemap fetch failed: HTTP ${res.status}. Falling back to seed URLs.\n`
+        );
+        return [];
+      }
+      xml = await res.text();
+    } catch (err: any) {
+      process.stderr.write(
+        `[ArchitectureCenterFetcher] Sitemap fetch error: ${err?.message ?? err}. Falling back to seed URLs.\n`
+      );
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // Extract <loc> values that match /docs/ref-arch/ paths.
+    const locRe  = /<loc>\s*(https?:\/\/[^<]+\/docs\/ref-arch\/[^<\s]+)\s*<\/loc>/gi;
+    const urls: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = locRe.exec(xml)) !== null) {
+      urls.push(m[1].trim());
+    }
+    return urls;
   }
 
   // -------------------------------------------------------------------

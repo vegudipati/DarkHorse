@@ -191,18 +191,19 @@ function buildArchitectureCenterFetcher(): IFetcher {
     return new ArchitectureCenterFetcher({ live: false });
   }
 
-  // Build URL list: seed fixture URLs + any extras from URLS_FILE.
+  // Seed URLs: merged from fixture + optional URLS_FILE. These are used as
+  // fallback if sitemap discovery returns nothing, and to fill any gaps.
   const seedPath = path.resolve(
     __dirname, '..', 'fixtures', 'architecture-center-seed.json'
   );
-  const urlSet = new Set<string>();
+  const seedUrls: string[] = [];
 
   if (fs.existsSync(seedPath)) {
     const seed = JSON.parse(fs.readFileSync(seedPath, 'utf-8')) as {
       entries: Array<{ url?: string | null }>;
     };
     for (const e of seed.entries ?? []) {
-      if (e.url) urlSet.add(e.url);
+      if (e.url) seedUrls.push(e.url);
     }
   }
 
@@ -213,23 +214,15 @@ function buildArchitectureCenterFetcher(): IFetcher {
     }
     const extra = JSON.parse(fs.readFileSync(extraFile, 'utf-8')) as { urls?: string[] };
     for (const u of extra.urls ?? []) {
-      if (u) urlSet.add(u);
+      if (u) seedUrls.push(u);
     }
   }
 
-  const urls = Array.from(urlSet);
-  if (urls.length === 0) {
-    throw new Error(
-      'architecture-center live=true: no URLs to scrape. ' +
-      'Ensure fixtures/architecture-center-seed.json has entries with url fields, ' +
-      'or set DARKHORSE_ARCH_CENTER_URLS_FILE.'
-    );
-  }
-
   return new ArchitectureCenterFetcher({
-    live:       true,
-    urls,
-    chromePath: process.env.DARKHORSE_CHROME_PATH
+    live:         true,
+    discoverUrls: true,   // fetch sitemap.xml → all /docs/ref-arch/* URLs
+    urls:         seedUrls, // merged as fallback / gap-filler
+    chromePath:   process.env.DARKHORSE_CHROME_PATH
   });
 }
 
@@ -625,10 +618,13 @@ Commands:
       and later sessions.
 
       architecture-center env vars (only needed for live mode):
-        DARKHORSE_ARCH_CENTER_LIVE=true          headless-Chrome scrape
+        DARKHORSE_ARCH_CENTER_LIVE=true          headless-Chrome scrape of ALL
+                                                 ref-archs (auto-discovered from
+                                                 sitemap.xml, ~87 pages)
         DARKHORSE_ARCH_CENTER_URLS_FILE=<path>   extra URLs JSON { "urls": [...] }
         DARKHORSE_CHROME_PATH=<optional browser exe override>
-        Default URLs come from fixtures/architecture-center-seed.json (9 entries).
+        Seed URLs from fixtures/architecture-center-seed.json fill any
+        sitemap gaps.
 
       help-portal-cds env vars (only needed for live mode):
         DARKHORSE_HELP_PORTAL_LIVE=true

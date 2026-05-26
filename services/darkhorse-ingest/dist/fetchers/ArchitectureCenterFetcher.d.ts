@@ -29,8 +29,14 @@
 import { IFetcher, IngestDocument, SourceId } from '../types';
 export interface ArchitectureCenterFetcherOptions {
     live?: boolean;
-    /** URLs to render. Required when live=true. Each must point at a
-     *  /docs/ref-arch/<id> page. */
+    /** Auto-discover all ref-arch URLs from the site's sitemap.xml before
+     *  scraping. When true, the urls[] list is used as a fallback seed in case
+     *  sitemap discovery returns zero results. Default false. */
+    discoverUrls?: boolean;
+    /** Override the sitemap URL. Default: https://architecture.learning.sap.com/sitemap.xml */
+    sitemapUrl?: string;
+    /** Seed URL list. When discoverUrls=true these are merged with sitemap
+     *  results (deduped). When discoverUrls=false, required for live mode. */
     urls?: string[];
     /** Override fixture path for tests. */
     fixturePath?: string;
@@ -41,6 +47,8 @@ export interface ArchitectureCenterFetcherOptions {
     contentSelector?: string;
     /** Per-page timeout in ms. Default 30s. */
     pageTimeoutMs?: number;
+    /** Timeout in ms for the sitemap HTTP fetch. Default 15s. */
+    sitemapTimeoutMs?: number;
 }
 export declare class ArchitectureCenterFetcher implements IFetcher {
     private readonly options;
@@ -50,6 +58,7 @@ export declare class ArchitectureCenterFetcher implements IFetcher {
     fetch(): Promise<IngestDocument[]>;
     private fetchFromFixture;
     private fetchLive;
+    private discoverFromSitemap;
     private toDocument;
 }
 //# sourceMappingURL=ArchitectureCenterFetcher.d.ts.map

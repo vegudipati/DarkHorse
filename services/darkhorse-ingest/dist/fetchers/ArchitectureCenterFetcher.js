@@ -66,12 +66,26 @@ class ArchitectureCenterFetcher {
     // Live Puppeteer path — wired, disabled by default
     // -------------------------------------------------------------------
     async fetchLive() {
-        if (!this.options.urls || this.options.urls.length === 0) {
-            throw new Error('ArchitectureCenterFetcher: live=true requires urls[] in options.');
-        }
         const browserInfo = (0, BrowserDiscovery_1.discoverBrowser)(this.options.chromePath);
         const contentSel = this.options.contentSelector ?? 'article, main, [class*="docMainContainer"]';
         const timeoutMs = this.options.pageTimeoutMs ?? 30_000;
+        // Build the URL list — sitemap discovery + seed merge.
+        let urls;
+        if (this.options.discoverUrls) {
+            const discovered = await this.discoverFromSitemap();
+            const seed = this.options.urls ?? [];
+            const merged = new Set([...discovered, ...seed]);
+            urls = Array.from(merged);
+            process.stderr.write(`[ArchitectureCenterFetcher] Sitemap: ${discovered.length} ref-arch URLs discovered; ` +
+                `${urls.length} total after merging seed.\n`);
+        }
+        else {
+            urls = this.options.urls ?? [];
+        }
+        if (urls.length === 0) {
+            throw new Error('ArchitectureCenterFetcher: no URLs to scrape. ' +
+                'Set discoverUrls=true or provide urls[] in options.');
+        }
         // Lazy import puppeteer-core so the seed-fixture path doesn't pay the cost.
         const puppeteer = require('puppeteer-core');
         const browser = await puppeteer.launch({
@@ -82,7 +96,7 @@ class ArchitectureCenterFetcher {
         const docs = [];
         try {
             const fetchedAt = new Date().toISOString();
-            for (const url of this.options.urls) {
+            for (const url of urls) {
                 const page = await browser.newPage();
                 try {
                     await page.goto(url, { waitUntil: 'networkidle2', timeout: timeoutMs });
@@ -116,6 +130,45 @@ class ArchitectureCenterFetcher {
             await browser.close();
         }
         return docs;
+    }
+    // -------------------------------------------------------------------
+    // Sitemap discovery — plain HTTP, no headless browser needed.
+    // Fetches sitemap.xml and extracts all /docs/ref-arch/* loc entries.
+    // -------------------------------------------------------------------
+    async discoverFromSitemap() {
+        const sitemapUrl = this.options.sitemapUrl
+            ?? 'https://architecture.learning.sap.com/sitemap.xml';
+        const timeoutMs = this.options.sitemapTimeoutMs ?? 15_000;
+        process.stderr.write(`[ArchitectureCenterFetcher] Fetching sitemap: ${sitemapUrl}\n`);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        let xml;
+        try {
+            const res = await fetch(sitemapUrl, {
+                signal: controller.signal,
+                headers: { 'User-Agent': 'DarkHorse-Ingest/1.0', 'Accept': 'application/xml, text/xml, */*' }
+            });
+            if (!res.ok) {
+                process.stderr.write(`[ArchitectureCenterFetcher] Sitemap fetch failed: HTTP ${res.status}. Falling back to seed URLs.\n`);
+                return [];
+            }
+            xml = await res.text();
+        }
+        catch (err) {
+            process.stderr.write(`[ArchitectureCenterFetcher] Sitemap fetch error: ${err?.message ?? err}. Falling back to seed URLs.\n`);
+            return [];
+        }
+        finally {
+            clearTimeout(timer);
+        }
+        // Extract <loc> values that match /docs/ref-arch/ paths.
+        const locRe = /<loc>\s*(https?:\/\/[^<]+\/docs\/ref-arch\/[^<\s]+)\s*<\/loc>/gi;
+        const urls = [];
+        let m;
+        while ((m = locRe.exec(xml)) !== null) {
+            urls.push(m[1].trim());
+        }
+        return urls;
     }
     // -------------------------------------------------------------------
     // Shared shaping
