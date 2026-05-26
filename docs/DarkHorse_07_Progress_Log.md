@@ -10,11 +10,9 @@
 
 ## In Progress
 
-- **EDMX live run** — api.sap.com gates `$metadata` behind login. Use diagnose mode with API key to confirm auth, then run full ingest. See §Knowledge-base expansion for env var details.
+- **EDMX live run** — api.sap.com XSUAA auth in progress; user setting up BTP trial for client credentials. URL pattern confirmed: `catalog.svc/APIContent.APIs('<SVC>')/$value?type=EDMX&attachment=true`.
 
 ## Pipeline (Not Started)
-
-- **Architecture Center live mode** — flip `live: true` on existing fetcher.
 - **LearningPortalFetcher** — lowest priority.
 - **Sprint 7 — Agent Marketplace** — per `docs/DarkHorse_06_CPI6_RAG_MCP.md` §Sprint 7.
 - **Push commits to `origin/main`** when ready (currently 2 commits ahead).
@@ -78,6 +76,7 @@ Spec: `docs/DarkHorse_06_CPI6_RAG_MCP.md`.
 | Version | Summary |
 |---|---|
 | v0.7.35 | Hard absolute timeouts on LLM proxy + MCP calls. |
+| v0.7.36 | Architecture Center live mode — `DARKHORSE_ARCH_CENTER_LIVE=true` scrapes 9 priority ref-archs via headless Chrome; optional extra URLs via `DARKHORSE_ARCH_CENTER_URLS_FILE`. |
 
 ### Knowledge-base expansion
 
