@@ -14,7 +14,9 @@
 
 'use strict';
 
-import { KnowledgeProvider } from '../src/providers/KnowledgeProvider';
+import { KnowledgeProvider }      from '../src/providers/KnowledgeProvider';
+import { CdsFieldCatalogProvider,
+         CdsFieldSchema }         from '../src/providers/CdsFieldCatalogProvider';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -42,7 +44,14 @@ export interface GetCdsViewOutput {
   sapTable:        string;
   viewName:        string | null;
   viewLevel:       'A' | 'B' | 'C' | 'D' | null;
+  /** Legacy string-only field list — kept for older callers that only need
+   *  names. Populated from `fieldsDetail` when the field catalog has the
+   *  view. Empty array when the field catalog is silent on this view. */
   fields:          string[];
+  /** Structured field metadata for the released alternative view. Sourced
+   *  from CdsFieldCatalogProvider (HelpPortalFetcher output). Empty array
+   *  when no field-level data is available for this view yet. */
+  fieldsDetail:    CdsFieldSchema[];
   example:         string;
   rationale:       string;
   /** Falls through to a Level B BAPI when no Level A CDS is registered. */
@@ -54,6 +63,10 @@ export interface GetCdsViewOutput {
   proposed:        ProposedCdsView | null;
   source:          string;
   catalogVersion:  string;
+  /** Source of the fieldsDetail array, if any. 'help-portal-cds' when
+   *  HelpPortalFetcher populated it; null when the field catalog had no
+   *  entry for this view. */
+  fieldsSource:    string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +75,8 @@ export interface GetCdsViewOutput {
 
 export async function getCdsView(
   input: GetCdsViewInput,
-  provider: KnowledgeProvider
+  provider: KnowledgeProvider,
+  fieldCatalog?: CdsFieldCatalogProvider
 ): Promise<GetCdsViewOutput> {
   if (!input || typeof input.sap_table !== 'string' || input.sap_table.trim().length === 0) {
     throw new Error('get_cds_view: sap_table is required and must be a non-empty string.');
@@ -88,6 +102,7 @@ export async function getCdsView(
       viewName:       null,
       viewLevel:      null,
       fields:         [],
+      fieldsDetail:   [],
       example:        '',
       rationale:
         `No released CDS interface view is registered for ${table} in the DarkHorse catalog. ` +
@@ -100,9 +115,15 @@ export async function getCdsView(
                         : null,
       proposed,
       source:         record.providerId,
-      catalogVersion: record.catalogVersion
+      catalogVersion: record.catalogVersion,
+      fieldsSource:   null
     };
   }
+
+  // Look up structured field metadata for the alternative view. Absence is
+  // expected for most views until HelpPortalFetcher has been run live —
+  // empty fields[] is not an error.
+  const fieldsDetail = fieldCatalog?.getFields(cdsAlt.name) ?? [];
 
   const example = buildSelectExample(table, cdsAlt.name, input.use_case);
 
@@ -111,7 +132,8 @@ export async function getCdsView(
     sapTable:       table,
     viewName:       cdsAlt.name,
     viewLevel:      cdsAlt.level,
-    fields:         [],   // catalog does not enumerate fields today; populated in a later session
+    fields:         fieldsDetail.map(f => f.name),
+    fieldsDetail,
     example,
     rationale:
       `Direct SELECTs on ${table} are Clean Core Level ${record.level}. ` +
@@ -120,7 +142,8 @@ export async function getCdsView(
     fallbackHint:   null,
     proposed:       null,
     source:         record.providerId,
-    catalogVersion: record.catalogVersion
+    catalogVersion: record.catalogVersion,
+    fieldsSource:   fieldsDetail.length > 0 ? 'help-portal-cds' : null
   };
 }
 

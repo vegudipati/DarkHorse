@@ -815,14 +815,49 @@ function renderCdsView(table: string, res: any): GroundingItem | null {
         `use it. Otherwise, document the gap and propose a Level B alternative.`
     };
   }
+  // CPI-6 A12 — when HelpPortalFetcher has populated field metadata for the
+  // released view, surface the field table in the grounding block so the LLM
+  // stops guessing column names (this is the root cause of the `ktokk` on
+  // I_Supplier / invented LIKP-column class of hallucinations).
+  const fieldBlock = renderFieldList(d.fieldsDetail, d.fieldsSource, d.viewName);
+
   return {
     heading: `Read access for ${table} -> ${d.viewName}`,
     tool:    'get_cds_view',
     body:
       `Use released CDS view ${d.viewName} (Clean Core Level ${d.viewLevel}) in place of direct SELECT FROM ${table}.\n` +
       `Rationale: ${d.rationale}\n` +
-      `Sample:\n${d.example}`
+      `Sample:\n${d.example}` +
+      (fieldBlock ? `\n\n${fieldBlock}` : '')
   };
+}
+
+/**
+ * Render the help-portal field metadata for the LLM. When the field catalog
+ * has no entry for this view, returns empty string so the prompt block stays
+ * concise. When fields are present, renders a markdown table — the same
+ * format the LLM has seen in the cloudification grounding blocks, which is
+ * the most reliable shape for it to parse and quote back in code.
+ */
+function renderFieldList(
+  fields: any[] | undefined,
+  source: string | null | undefined,
+  viewName: string
+): string {
+  if (!fields || fields.length === 0) return '';
+
+  const head = `Released fields on ${viewName} (source: ${source ?? 'help-portal-cds'}). ` +
+               `Use ONLY these field names in your SELECT — do NOT invent or carry over ` +
+               `column names from the underlying SAP table.`;
+
+  const lines: string[] = [head, '', '| Name | Type | Key | Description |', '| --- | --- | --- | --- |'];
+  for (const f of fields) {
+    const type = [f.type, f.length].filter(Boolean).join(' ').trim() || '—';
+    const key  = f.isKey ? 'KEY' : '';
+    const desc = (f.description || '').replace(/\|/g, '/').slice(0, 120);
+    lines.push(`| ${f.name} | ${type} | ${key} | ${desc} |`);
+  }
+  return lines.join('\n');
 }
 
 function renderEml(op: string, entityHint: string, res: any): GroundingItem | null {

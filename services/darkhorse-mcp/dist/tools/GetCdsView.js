@@ -17,7 +17,7 @@ exports.getCdsView = getCdsView;
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-async function getCdsView(input, provider) {
+async function getCdsView(input, provider, fieldCatalog) {
     if (!input || typeof input.sap_table !== 'string' || input.sap_table.trim().length === 0) {
         throw new Error('get_cds_view: sap_table is required and must be a non-empty string.');
     }
@@ -39,6 +39,7 @@ async function getCdsView(input, provider) {
             viewName: null,
             viewLevel: null,
             fields: [],
+            fieldsDetail: [],
             example: '',
             rationale: `No released CDS interface view is registered for ${table} in the DarkHorse catalog. ` +
                 `PROPOSED: include a new DDLS object ${proposed.name} in the abapObjectList ` +
@@ -50,16 +51,22 @@ async function getCdsView(input, provider) {
                 : null,
             proposed,
             source: record.providerId,
-            catalogVersion: record.catalogVersion
+            catalogVersion: record.catalogVersion,
+            fieldsSource: null
         };
     }
+    // Look up structured field metadata for the alternative view. Absence is
+    // expected for most views until HelpPortalFetcher has been run live —
+    // empty fields[] is not an error.
+    const fieldsDetail = fieldCatalog?.getFields(cdsAlt.name) ?? [];
     const example = buildSelectExample(table, cdsAlt.name, input.use_case);
     return {
         found: true,
         sapTable: table,
         viewName: cdsAlt.name,
         viewLevel: cdsAlt.level,
-        fields: [], // catalog does not enumerate fields today; populated in a later session
+        fields: fieldsDetail.map(f => f.name),
+        fieldsDetail,
         example,
         rationale: `Direct SELECTs on ${table} are Clean Core Level ${record.level}. ` +
             `Use the released CDS interface view ${cdsAlt.name} (Level ${cdsAlt.level}) instead. ` +
@@ -67,7 +74,8 @@ async function getCdsView(input, provider) {
         fallbackHint: null,
         proposed: null,
         source: record.providerId,
-        catalogVersion: record.catalogVersion
+        catalogVersion: record.catalogVersion,
+        fieldsSource: fieldsDetail.length > 0 ? 'help-portal-cds' : null
     };
 }
 // ---------------------------------------------------------------------------

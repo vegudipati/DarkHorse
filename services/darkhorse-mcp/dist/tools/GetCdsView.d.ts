@@ -12,6 +12,7 @@
  * returned view name + level to rewrite the SELECT path Level A.
  */
 import { KnowledgeProvider } from '../src/providers/KnowledgeProvider';
+import { CdsFieldCatalogProvider, CdsFieldSchema } from '../src/providers/CdsFieldCatalogProvider';
 export interface GetCdsViewInput {
     sap_table: string;
     use_case?: string;
@@ -32,7 +33,14 @@ export interface GetCdsViewOutput {
     sapTable: string;
     viewName: string | null;
     viewLevel: 'A' | 'B' | 'C' | 'D' | null;
+    /** Legacy string-only field list — kept for older callers that only need
+     *  names. Populated from `fieldsDetail` when the field catalog has the
+     *  view. Empty array when the field catalog is silent on this view. */
     fields: string[];
+    /** Structured field metadata for the released alternative view. Sourced
+     *  from CdsFieldCatalogProvider (HelpPortalFetcher output). Empty array
+     *  when no field-level data is available for this view yet. */
+    fieldsDetail: CdsFieldSchema[];
     example: string;
     rationale: string;
     /** Falls through to a Level B BAPI when no Level A CDS is registered. */
@@ -44,6 +52,10 @@ export interface GetCdsViewOutput {
     proposed: ProposedCdsView | null;
     source: string;
     catalogVersion: string;
+    /** Source of the fieldsDetail array, if any. 'help-portal-cds' when
+     *  HelpPortalFetcher populated it; null when the field catalog had no
+     *  entry for this view. */
+    fieldsSource: string | null;
 }
-export declare function getCdsView(input: GetCdsViewInput, provider: KnowledgeProvider): Promise<GetCdsViewOutput>;
+export declare function getCdsView(input: GetCdsViewInput, provider: KnowledgeProvider, fieldCatalog?: CdsFieldCatalogProvider): Promise<GetCdsViewOutput>;
 //# sourceMappingURL=GetCdsView.d.ts.map

@@ -22,6 +22,8 @@ import { Pipeline }                  from './Pipeline';
 import { SapApiHubFetcher }          from './fetchers/SapApiHubFetcher';
 import { CleanCoreGuideFetcher }     from './fetchers/CleanCoreGuideFetcher';
 import { ArchitectureCenterFetcher } from './fetchers/ArchitectureCenterFetcher';
+import { HelpPortalFetcher,
+         ViewTarget }                from './fetchers/HelpPortalFetcher';
 import { TokenChunker }              from './chunker/TokenChunker';
 import { MockEmbedder }              from './embedders/MockEmbedder';
 import { AzureOpenAiEmbedder }       from './embedders/AzureOpenAiEmbedder';
@@ -43,12 +45,14 @@ type SourceKey =
   | 'sap-api-hub'
   | 'clean-core-guide'
   | 'architecture-center'
+  | 'help-portal-cds'
   | 'all';   // shorthand: ingest every known source
 
 const KNOWN_SOURCES: Exclude<SourceKey, 'all'>[] = [
   'sap-api-hub',
   'clean-core-guide',
-  'architecture-center'
+  'architecture-center',
+  'help-portal-cds'
 ];
 
 function buildFetcher(source: Exclude<SourceKey, 'all'>): IFetcher {
@@ -56,9 +60,59 @@ function buildFetcher(source: Exclude<SourceKey, 'all'>): IFetcher {
     case 'sap-api-hub':         return new SapApiHubFetcher({ live: false });
     case 'clean-core-guide':    return new CleanCoreGuideFetcher({ live: false });
     case 'architecture-center': return new ArchitectureCenterFetcher({ live: false });
+    case 'help-portal-cds':     return buildHelpPortalFetcher();
     default:
       throw new Error(`Unknown source "${source}". Known sources: ${KNOWN_SOURCES.join(', ')}`);
   }
+}
+
+/**
+ * HelpPortalFetcher builder — honours env vars:
+ *   - DARKHORSE_HELP_PORTAL_LIVE=true|1            switch from fixture to live
+ *   - DARKHORSE_HELP_PORTAL_TARGETS=<absolute path> read view targets from a
+ *                                                 JSON file (see fixtures/
+ *                                                 help-portal-targets.json)
+ *   - DARKHORSE_HELP_PORTAL_CHECKPOINT=<path>      JSON-lines progress log
+ *   - DARKHORSE_CHROME_PATH=<exe>                  browser override (also read
+ *                                                 by BrowserDiscovery)
+ *
+ * Fixture mode is the default so `ingest all` works on a fresh checkout
+ * without a browser.
+ */
+function buildHelpPortalFetcher(): IFetcher {
+  const fs = require('fs') as typeof import('fs');
+
+  const live = ['1', 'true', 'yes'].includes(
+    (process.env.DARKHORSE_HELP_PORTAL_LIVE ?? '').toLowerCase()
+  );
+
+  if (!live) {
+    return new HelpPortalFetcher({ live: false });
+  }
+
+  const targetsPath = process.env.DARKHORSE_HELP_PORTAL_TARGETS;
+  if (!targetsPath) {
+    throw new Error(
+      'help-portal-cds live=true requires DARKHORSE_HELP_PORTAL_TARGETS to point at a JSON file ' +
+      'containing the view targets to fetch. Example shape: { "targets": [{ "viewName": "...", "url": "..." }] }'
+    );
+  }
+  if (!fs.existsSync(targetsPath)) {
+    throw new Error(`help-portal-cds: targets file not found at ${targetsPath}`);
+  }
+
+  const parsed = JSON.parse(fs.readFileSync(targetsPath, 'utf-8')) as { targets: ViewTarget[] };
+  if (!parsed.targets || !Array.isArray(parsed.targets) || parsed.targets.length === 0) {
+    throw new Error(`help-portal-cds: targets file ${targetsPath} must contain a non-empty targets[] array.`);
+  }
+
+  return new HelpPortalFetcher({
+    live:           true,
+    targets:        parsed.targets,
+    chromePath:     process.env.DARKHORSE_CHROME_PATH,
+    checkpointPath: process.env.DARKHORSE_HELP_PORTAL_CHECKPOINT,
+    verbose:        true
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -427,9 +481,16 @@ function printHelp(): void {
 Commands:
   ingest <source> [--snapshot <path>]
       Run fetch → chunk → embed → index for <source>.
-      Sources: sap-api-hub | clean-core-guide | architecture-center | all
+      Sources: sap-api-hub | clean-core-guide | architecture-center
+             | help-portal-cds | all
       Optional --snapshot writes a JSON snapshot for the verify command
       and later sessions.
+
+      help-portal-cds env vars (only needed for live mode):
+        DARKHORSE_HELP_PORTAL_LIVE=true
+        DARKHORSE_HELP_PORTAL_TARGETS=<abs-path-to-help-portal-targets.json>
+        DARKHORSE_HELP_PORTAL_CHECKPOINT=<optional jsonl progress log>
+        DARKHORSE_CHROME_PATH=<optional browser exe override>
 
   verify [--snapshot <path>]
       Probe the index with known SAP references and report pass/fail.

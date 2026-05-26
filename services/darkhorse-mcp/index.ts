@@ -49,6 +49,7 @@ import { CloudificationCatalogProvider }  from './src/providers/CloudificationCa
 import { TerminalStubProvider }           from './src/providers/TerminalStubProvider';
 import { AzureSearchKnowledgeProvider }   from './src/providers/AzureSearchKnowledgeProvider';
 import { CompositeKnowledgeProvider }     from './src/providers/CompositeKnowledgeProvider';
+import { CdsFieldCatalogProvider }        from './src/providers/CdsFieldCatalogProvider';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -328,6 +329,7 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
 function buildApp(
   provider: KnowledgeProvider,
   staticProvider: StaticCatalogProvider,
+  fieldCatalog: CdsFieldCatalogProvider,
   providerReason: string
 ): express.Application {
 
@@ -345,7 +347,11 @@ function buildApp(
       pid:              process.pid,
       uptime:           process.uptime(),
       tools:            TOOL_DESCRIPTORS.map(t => t.name),
-      knowledgeProvider: { id: provider.id, reason: providerReason }
+      knowledgeProvider: { id: provider.id, reason: providerReason },
+      fieldCatalog:     {
+        id:    fieldCatalog.id,
+        views: fieldCatalog.size()
+      }
     });
   });
 
@@ -389,7 +395,7 @@ function buildApp(
   // Sprint 3 Session 1 — three new tools for pre-generation grounding
   app.post('/tools/get-cds-view', (req: express.Request, res: express.Response) => {
     runTool(req, res, 'get_cds_view', () =>
-      getCdsView(req.body as GetCdsViewInput, provider));
+      getCdsView(req.body as GetCdsViewInput, provider, fieldCatalog));
   });
 
   app.post('/tools/get-eml-syntax', (req: express.Request, res: express.Response) => {
@@ -532,8 +538,9 @@ async function main(): Promise<void> {
   validateEnvironment();
 
   const { provider, staticProvider, reason } = buildKnowledgeProvider();
+  const fieldCatalog = new CdsFieldCatalogProvider({ verbose: true });
 
-  const app    = buildApp(provider, staticProvider, reason);
+  const app    = buildApp(provider, staticProvider, fieldCatalog, reason);
   const server = http.createServer(app);
 
   setupShutdownHandlers(server);
@@ -544,6 +551,9 @@ async function main(): Promise<void> {
       `[DarkHorse MCP] Tools: ${TOOL_DESCRIPTORS.map(t => t.name).join(', ')}\n`
     );
     process.stdout.write(`[DarkHorse MCP] KnowledgeProvider: ${reason}\n`);
+    process.stdout.write(
+      `[DarkHorse MCP] Field catalog: ${fieldCatalog.size()} CDS views with field metadata\n`
+    );
   });
 
   server.on('error', (err: NodeJS.ErrnoException) => {

@@ -26,7 +26,8 @@
 export type SourceId =
   | 'SAP_API_HUB'
   | 'SAP_CLEAN_CORE_GUIDE'
-  | 'SAP_ARCHITECTURE_CENTER';
+  | 'SAP_ARCHITECTURE_CENTER'
+  | 'SAP_HELP_PORTAL_CDS';
 
 export type SapObjectType =
   | 'CDS'    | 'BAPI'   | 'BADI'   | 'EXIT'

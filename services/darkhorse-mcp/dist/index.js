@@ -45,6 +45,7 @@ const CloudificationCatalogProvider_1 = require("./src/providers/CloudificationC
 const TerminalStubProvider_1 = require("./src/providers/TerminalStubProvider");
 const AzureSearchKnowledgeProvider_1 = require("./src/providers/AzureSearchKnowledgeProvider");
 const CompositeKnowledgeProvider_1 = require("./src/providers/CompositeKnowledgeProvider");
+const CdsFieldCatalogProvider_1 = require("./src/providers/CdsFieldCatalogProvider");
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -281,7 +282,7 @@ const TOOL_DESCRIPTORS = [
 // ---------------------------------------------------------------------------
 // Build Express app
 // ---------------------------------------------------------------------------
-function buildApp(provider, staticProvider, providerReason) {
+function buildApp(provider, staticProvider, fieldCatalog, providerReason) {
     const app = express();
     app.use(express.json({ limit: '128kb' }));
     // -------------------------------------------------------------------
@@ -295,7 +296,11 @@ function buildApp(provider, staticProvider, providerReason) {
             pid: process.pid,
             uptime: process.uptime(),
             tools: TOOL_DESCRIPTORS.map(t => t.name),
-            knowledgeProvider: { id: provider.id, reason: providerReason }
+            knowledgeProvider: { id: provider.id, reason: providerReason },
+            fieldCatalog: {
+                id: fieldCatalog.id,
+                views: fieldCatalog.size()
+            }
         });
     });
     // -------------------------------------------------------------------
@@ -327,7 +332,7 @@ function buildApp(provider, staticProvider, providerReason) {
     });
     // Sprint 3 Session 1 — three new tools for pre-generation grounding
     app.post('/tools/get-cds-view', (req, res) => {
-        runTool(req, res, 'get_cds_view', () => (0, GetCdsView_1.getCdsView)(req.body, provider));
+        runTool(req, res, 'get_cds_view', () => (0, GetCdsView_1.getCdsView)(req.body, provider, fieldCatalog));
     });
     app.post('/tools/get-eml-syntax', (req, res) => {
         runTool(req, res, 'get_eml_syntax', () => (0, GetEmlSyntax_1.getEmlSyntax)(req.body));
@@ -435,13 +440,15 @@ function validateEnvironment() {
 async function main() {
     validateEnvironment();
     const { provider, staticProvider, reason } = buildKnowledgeProvider();
-    const app = buildApp(provider, staticProvider, reason);
+    const fieldCatalog = new CdsFieldCatalogProvider_1.CdsFieldCatalogProvider({ verbose: true });
+    const app = buildApp(provider, staticProvider, fieldCatalog, reason);
     const server = http.createServer(app);
     setupShutdownHandlers(server);
     server.listen(MCP_PORT, MCP_HOST, () => {
         process.stdout.write(`[DarkHorse MCP] Ready on ${MCP_HOST}:${MCP_PORT}\n`);
         process.stdout.write(`[DarkHorse MCP] Tools: ${TOOL_DESCRIPTORS.map(t => t.name).join(', ')}\n`);
         process.stdout.write(`[DarkHorse MCP] KnowledgeProvider: ${reason}\n`);
+        process.stdout.write(`[DarkHorse MCP] Field catalog: ${fieldCatalog.size()} CDS views with field metadata\n`);
     });
     server.on('error', (err) => {
         if (err.code === 'EADDRINUSE') {

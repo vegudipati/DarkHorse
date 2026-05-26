@@ -521,11 +521,32 @@ function renderCdsView(table: string, res: any): TdsGroundingItem | null {
       body:    `MCP reports NO released CDS view registered for ${table}. Document the gap in openItems; do not direct-SELECT in the TDS pseudocode.`
     };
   }
+  const fieldBlock = renderTdsFieldList(d.fieldsDetail, d.fieldsSource, d.viewName);
   return {
     heading: `Read access for ${table} -> ${d.viewName}`,
     tool:    'get_cds_view',
-    body:    `Use released CDS view ${d.viewName} (Level ${d.viewLevel}) in place of direct SELECT FROM ${table}. The TDS pseudocode for any "read ${table}" step should reference ${d.viewName}.`
+    body:    `Use released CDS view ${d.viewName} (Level ${d.viewLevel}) in place of direct SELECT FROM ${table}. The TDS pseudocode for any "read ${table}" step should reference ${d.viewName}.` +
+             (fieldBlock ? `\n\n${fieldBlock}` : '')
   };
+}
+
+function renderTdsFieldList(
+  fields: any[] | undefined,
+  source: string | null | undefined,
+  viewName: string
+): string {
+  if (!fields || fields.length === 0) return '';
+  const head = `Fields on ${viewName} (source: ${source ?? 'help-portal-cds'}). ` +
+               `When the TDS inputOutputSpec lists fields to expose, draw from THIS list — ` +
+               `not from the underlying SAP table.`;
+  const lines: string[] = [head, '', '| Name | Type | Key | Description |', '| --- | --- | --- | --- |'];
+  for (const f of fields) {
+    const type = [f.type, f.length].filter(Boolean).join(' ').trim() || '—';
+    const key  = f.isKey ? 'KEY' : '';
+    const desc = (f.description || '').replace(/\|/g, '/').slice(0, 120);
+    lines.push(`| ${f.name} | ${type} | ${key} | ${desc} |`);
+  }
+  return lines.join('\n');
 }
 
 function renderFioriPattern(scenario: string, res: any): TdsGroundingItem | null {

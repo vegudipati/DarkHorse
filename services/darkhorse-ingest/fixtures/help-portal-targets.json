@@ -1,0 +1,119 @@
+{
+  "_metadata": {
+    "purpose": "Seed of CDS view targets for HelpPortalFetcher. View-name list = views referenced in the three failing pipelines (OTC-E-0545, PTP-E-0190, ZOTC routing) + canonical SD/MM/FI/BP released views.",
+    "howToUse": "Set DARKHORSE_HELP_PORTAL_LIVE=true + DARKHORSE_HELP_PORTAL_TARGETS=<abs-path-to-this-file>, then run `node dist/index.js ingest help-portal-cds`.",
+    "urlNote_IMPORTANT": "The URLs below are EDUCATED GUESSES based on a help.sap.com URL pattern I observed (GUID-based path + .html suffix). They have NOT been verified — help.sap.com may use a different URL scheme. If the first fetch returns hasFields:false across the board, the URL pattern is wrong; manually browse to one view's reference page and update one entry to confirm the real pattern. Once one URL works, the others typically follow the same shape.",
+    "scaleNote": "After verifying the URL pattern works, expand from these 18 views to the full 7,566 released CDS views by walking the cloudification fixture (CDS_STOB entries with state=released). A follow-up task will automate this discovery via help.sap.com sitemap.",
+    "schemaVersion": "1.0.0"
+  },
+  "targets": [
+    {
+      "viewName": "I_SalesDocument",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_SALESDOCUMENT.html",
+      "module": "SD",
+      "notes": "Sales document header — released CDS view replacing direct SELECTs on VBAK."
+    },
+    {
+      "viewName": "I_SalesDocumentItem",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_SALESDOCUMENTITEM.html",
+      "module": "SD",
+      "notes": "Sales document item — replaces VBAP."
+    },
+    {
+      "viewName": "I_SalesDocumentScheduleLine",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_SALESDOCUMENTSCHEDULELINE.html",
+      "module": "SD",
+      "notes": "Schedule lines — replaces VBEP. Used in ATP / backorder scenarios."
+    },
+    {
+      "viewName": "I_OutboundDelivery",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_OUTBOUNDDELIVERY.html",
+      "module": "SD",
+      "notes": "Outbound delivery header — replaces LIKP. ZOTC routing pipeline wrapped LIKP unnecessarily."
+    },
+    {
+      "viewName": "I_OutboundDeliveryItem",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_OUTBOUNDDELIVERYITEM.html",
+      "module": "SD",
+      "notes": "Outbound delivery item — replaces LIPS."
+    },
+    {
+      "viewName": "I_CustomerSalesArea",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_CUSTOMERSALESAREA.html",
+      "module": "SD",
+      "notes": "Customer sales area data — replaces KNVV."
+    },
+    {
+      "viewName": "I_PurchaseOrder",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_PURCHASEORDER.html",
+      "module": "MM",
+      "notes": "Purchase order header — replaces EKKO."
+    },
+    {
+      "viewName": "I_PurchaseOrderItem",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_PURCHASEORDERITEM.html",
+      "module": "MM",
+      "notes": "Purchase order item — replaces EKPO. Used in PTP-E-0190 PO enhancement scenario."
+    },
+    {
+      "viewName": "I_PurchaseRequisition",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_PURCHASEREQUISITION.html",
+      "module": "MM",
+      "notes": "Purchase requisition — replaces EBAN."
+    },
+    {
+      "viewName": "I_Product",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_PRODUCT.html",
+      "module": "MM",
+      "notes": "Material master / product — replaces MARA."
+    },
+    {
+      "viewName": "I_ProductPlant",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_PRODUCTPLANT.html",
+      "module": "MM",
+      "notes": "Material plant data — replaces MARC."
+    },
+    {
+      "viewName": "I_BusinessPartner",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_BUSINESSPARTNER.html",
+      "module": "BP",
+      "notes": "Business partner (leading object in S/4HANA for customer/vendor)."
+    },
+    {
+      "viewName": "I_Customer",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_CUSTOMER.html",
+      "module": "SD",
+      "notes": "Customer master — replaces KNA1. Bug context: zcl_po_tms_badi_impl tried to SELECT lifnr/ktokk on I_Supplier; same class of mistake."
+    },
+    {
+      "viewName": "I_Supplier",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_SUPPLIER.html",
+      "module": "MM",
+      "notes": "Supplier master — replaces LFA1. PTP-E-0190 SELECTed nonexistent `ktokk` field here."
+    },
+    {
+      "viewName": "I_JournalEntry",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_JOURNALENTRY.html",
+      "module": "FI",
+      "notes": "Journal entry header — replaces BKPF."
+    },
+    {
+      "viewName": "I_JournalEntryItem",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_JOURNALENTRYITEM.html",
+      "module": "FI",
+      "notes": "Journal entry item — replaces BSEG / accesses ACDOCA."
+    },
+    {
+      "viewName": "I_CustomerOpenItem",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_CUSTOMEROPENITEM.html",
+      "module": "FI",
+      "notes": "Customer open items — replaces BSID (not maintained in S/4)."
+    },
+    {
+      "viewName": "I_SupplierOpenItem",
+      "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD/0f69f8fb28ac4bf48d2b57b9637e81fa/I_SUPPLIEROPENITEM.html",
+      "module": "FI",
+      "notes": "Supplier open items — replaces BSIK."
+    }
+  ]
+}
