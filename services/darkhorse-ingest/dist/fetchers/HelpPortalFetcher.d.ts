@@ -90,24 +90,27 @@ export interface HelpPortalFetcherOptions {
     /** When true, launches puppeteer-core and scrapes each ViewTarget.
      *  When false (default), loads from the seed fixture. */
     live?: boolean;
-    /** Required when live=true. The set of views to fetch. */
+    /** Crawl mode: render this root URL, discover all child links under the
+     *  same product/version prefix, and scrape each. Supersedes targets[].
+     *  Example: https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/<ver>/<guid>.html */
+    crawlRootUrl?: string;
+    /** Maximum crawl depth from root. Default 3. */
+    maxCrawlDepth?: number;
+    /** Maximum pages to scrape beyond the root. Default 500. */
+    maxCrawlPages?: number;
+    /** Flat targets list. Required when live=true and crawlRootUrl is not set. */
     targets?: ViewTarget[];
     /** Override fixture path for tests / replay. */
     fixturePath?: string;
     /** Explicit browser executable path. If absent, BrowserDiscovery resolves. */
     chromePath?: string;
-    /** CSS selector to wait for before extracting content. The help portal
-     *  renders its main content inside an <article> or [class*="content"]
-     *  region; we try both in priority order. */
+    /** CSS selector to wait for before extracting content. */
     contentSelector?: string;
     /** Per-page timeout in ms. Default 45s — help.sap.com is slow. */
     pageTimeoutMs?: number;
-    /** Milliseconds to sleep between pages so we don't pound the server.
-     *  Default 1500ms. */
+    /** Milliseconds to sleep between pages. Default 1500ms. */
     rateLimitMs?: number;
-    /** Optional checkpoint file path. When set, the fetcher writes each
-     *  successful extract to this file as a JSON line so a long ingest can
-     *  resume after interruption. */
+    /** Optional checkpoint file path (JSON-lines, one completed URL per line). */
     checkpointPath?: string;
     /** When verbose=true, print per-view progress to stderr. */
     verbose?: boolean;
@@ -120,6 +123,8 @@ export declare class HelpPortalFetcher implements IFetcher {
     fetch(): Promise<IngestDocument[]>;
     private fetchFromFixture;
     private fetchLive;
+    private crawlFromRoot;
+    private writeSeedFixture;
     private toDocumentFromExtract;
     private toFailureDocument;
     private toDocumentFromSeed;

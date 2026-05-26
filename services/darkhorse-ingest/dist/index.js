@@ -98,16 +98,51 @@ function buildEdmxFetcher() {
  * Fixture mode is the default so `ingest all` works on a fresh checkout
  * without a browser.
  */
+/**
+ * HelpPortalFetcher builder — honours env vars:
+ *   - DARKHORSE_HELP_PORTAL_LIVE=true|1          enable live scraping
+ *
+ *  Crawl mode (recommended):
+ *   - DARKHORSE_HELP_PORTAL_ROOT_URL=<url>        root index page to crawl
+ *     e.g. https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/<ver>/<guid>.html
+ *     Discovers all child pages under the same product/version prefix,
+ *     extracts CDS field tables, writes results to the seed fixture.
+ *   - DARKHORSE_HELP_PORTAL_MAX_PAGES=N           page cap (default 500)
+ *   - DARKHORSE_HELP_PORTAL_MAX_DEPTH=N           crawl depth (default 3)
+ *
+ *  Flat-targets mode (manual list):
+ *   - DARKHORSE_HELP_PORTAL_TARGETS=<path>        JSON file { "targets": [...] }
+ *
+ *  Shared:
+ *   - DARKHORSE_HELP_PORTAL_CHECKPOINT=<path>     resume JSONL log
+ *   - DARKHORSE_CHROME_PATH=<exe>                 browser override
+ */
 function buildHelpPortalFetcher() {
     const fs = require('fs');
     const live = ['1', 'true', 'yes'].includes((process.env.DARKHORSE_HELP_PORTAL_LIVE ?? '').toLowerCase());
     if (!live) {
         return new HelpPortalFetcher_1.HelpPortalFetcher({ live: false });
     }
+    // Crawl mode — preferred when ROOT_URL is set.
+    const rootUrl = process.env.DARKHORSE_HELP_PORTAL_ROOT_URL;
+    if (rootUrl) {
+        const maxPages = parseInt(process.env.DARKHORSE_HELP_PORTAL_MAX_PAGES ?? '500', 10);
+        const maxDepth = parseInt(process.env.DARKHORSE_HELP_PORTAL_MAX_DEPTH ?? '3', 10);
+        return new HelpPortalFetcher_1.HelpPortalFetcher({
+            live: true,
+            crawlRootUrl: rootUrl,
+            maxCrawlPages: isFinite(maxPages) && maxPages > 0 ? maxPages : 500,
+            maxCrawlDepth: isFinite(maxDepth) && maxDepth > 0 ? maxDepth : 3,
+            chromePath: process.env.DARKHORSE_CHROME_PATH,
+            checkpointPath: process.env.DARKHORSE_HELP_PORTAL_CHECKPOINT,
+            verbose: true
+        });
+    }
+    // Flat-targets mode — legacy, requires explicit targets JSON.
     const targetsPath = process.env.DARKHORSE_HELP_PORTAL_TARGETS;
     if (!targetsPath) {
-        throw new Error('help-portal-cds live=true requires DARKHORSE_HELP_PORTAL_TARGETS to point at a JSON file ' +
-            'containing the view targets to fetch. Example shape: { "targets": [{ "viewName": "...", "url": "..." }] }');
+        throw new Error('help-portal-cds live=true requires either DARKHORSE_HELP_PORTAL_ROOT_URL ' +
+            '(crawl mode) or DARKHORSE_HELP_PORTAL_TARGETS (flat list mode).');
     }
     if (!fs.existsSync(targetsPath)) {
         throw new Error(`help-portal-cds: targets file not found at ${targetsPath}`);
@@ -483,8 +518,13 @@ Commands:
 
       help-portal-cds env vars (only needed for live mode):
         DARKHORSE_HELP_PORTAL_LIVE=true
-        DARKHORSE_HELP_PORTAL_TARGETS=<abs-path-to-help-portal-targets.json>
-        DARKHORSE_HELP_PORTAL_CHECKPOINT=<optional jsonl progress log>
+        DARKHORSE_HELP_PORTAL_ROOT_URL=<url>     crawl from this index page
+                                                 (recommended — auto-discovers
+                                                 all CDS view child pages)
+        DARKHORSE_HELP_PORTAL_MAX_PAGES=500      page cap for crawl
+        DARKHORSE_HELP_PORTAL_MAX_DEPTH=3        crawl depth cap
+        DARKHORSE_HELP_PORTAL_TARGETS=<path>     flat list mode (legacy)
+        DARKHORSE_HELP_PORTAL_CHECKPOINT=<path>  resume JSONL log
         DARKHORSE_CHROME_PATH=<optional browser exe override>
 
   verify [--snapshot <path>]

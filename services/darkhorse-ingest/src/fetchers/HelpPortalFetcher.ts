@@ -116,7 +116,18 @@ export interface HelpPortalFetcherOptions {
    *  When false (default), loads from the seed fixture. */
   live?:           boolean;
 
-  /** Required when live=true. The set of views to fetch. */
+  /** Crawl mode: render this root URL, discover all child links under the
+   *  same product/version prefix, and scrape each. Supersedes targets[].
+   *  Example: https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/<ver>/<guid>.html */
+  crawlRootUrl?:   string;
+
+  /** Maximum crawl depth from root. Default 3. */
+  maxCrawlDepth?:  number;
+
+  /** Maximum pages to scrape beyond the root. Default 500. */
+  maxCrawlPages?:  number;
+
+  /** Flat targets list. Required when live=true and crawlRootUrl is not set. */
   targets?:        ViewTarget[];
 
   /** Override fixture path for tests / replay. */
@@ -125,21 +136,16 @@ export interface HelpPortalFetcherOptions {
   /** Explicit browser executable path. If absent, BrowserDiscovery resolves. */
   chromePath?:     string;
 
-  /** CSS selector to wait for before extracting content. The help portal
-   *  renders its main content inside an <article> or [class*="content"]
-   *  region; we try both in priority order. */
+  /** CSS selector to wait for before extracting content. */
   contentSelector?: string;
 
   /** Per-page timeout in ms. Default 45s — help.sap.com is slow. */
   pageTimeoutMs?:  number;
 
-  /** Milliseconds to sleep between pages so we don't pound the server.
-   *  Default 1500ms. */
+  /** Milliseconds to sleep between pages. Default 1500ms. */
   rateLimitMs?:    number;
 
-  /** Optional checkpoint file path. When set, the fetcher writes each
-   *  successful extract to this file as a JSON line so a long ingest can
-   *  resume after interruption. */
+  /** Optional checkpoint file path (JSON-lines, one completed URL per line). */
   checkpointPath?: string;
 
   /** When verbose=true, print per-view progress to stderr. */
@@ -217,9 +223,15 @@ export class HelpPortalFetcher implements IFetcher {
   // -------------------------------------------------------------------
 
   private async fetchLive(): Promise<IngestDocument[]> {
+    if (this.options.crawlRootUrl) {
+      return this.crawlFromRoot(this.options.crawlRootUrl);
+    }
+
     const targets = this.options.targets ?? [];
     if (targets.length === 0) {
-      throw new Error('HelpPortalFetcher: live=true requires targets[] in options.');
+      throw new Error(
+        'HelpPortalFetcher: live=true requires either crawlRootUrl or targets[] in options.'
+      );
     }
 
     const browserInfo = discoverBrowser(this.options.chromePath);
@@ -318,6 +330,168 @@ export class HelpPortalFetcher implements IFetcher {
     }
 
     return docs;
+  }
+
+  // -------------------------------------------------------------------
+  // Crawl mode — discover all ref pages from a root URL
+  // -------------------------------------------------------------------
+
+  private async crawlFromRoot(rootUrl: string): Promise<IngestDocument[]> {
+    // URL prefix = everything up to and including the version GUID segment.
+    // e.g. https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/<ver>/<guid>.html
+    //  → prefix = https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/<ver>/
+    const urlPrefix = rootUrl.substring(0, rootUrl.lastIndexOf('/') + 1);
+
+    const maxDepth   = this.options.maxCrawlDepth  ?? 3;
+    const maxPages   = this.options.maxCrawlPages  ?? 500;
+    const verbose    = this.options.verbose        ?? false;
+    const timeoutMs  = this.options.pageTimeoutMs  ?? 45_000;
+    const rateMs     = this.options.rateLimitMs    ?? 1_500;
+    const contentSel = this.options.contentSelector
+      ?? 'article, main, [class*="markdown"], [class*="content"]';
+
+    if (verbose) {
+      process.stderr.write(
+        `[HelpPortalFetcher] Crawl mode — root: ${rootUrl}\n` +
+        `[HelpPortalFetcher] URL prefix filter: ${urlPrefix}\n` +
+        `[HelpPortalFetcher] maxDepth=${maxDepth} maxPages=${maxPages}\n`
+      );
+    }
+
+    const browserInfo = discoverBrowser(this.options.chromePath);
+    const puppeteer   = require('puppeteer-core') as typeof import('puppeteer-core');
+    const browser     = await puppeteer.launch({
+      executablePath: browserInfo.executablePath,
+      headless:       true,
+      args:           ['--no-sandbox', '--disable-dev-shm-usage']
+    });
+
+    const visited    = new Set<string>();
+    const queue: Array<{ url: string; depth: number }> = [{ url: rootUrl, depth: 0 }];
+    const docs:  IngestDocument[]  = [];
+    const seeds: HelpPortalSeedEntry[] = [];
+    const fetchedAt = new Date().toISOString();
+    let   pagesDone = 0;
+
+    // Checkpoint resume — skip already-visited URLs from a prior run.
+    const seenChkpt = loadCrawlCheckpoint(this.options.checkpointPath);
+    const chkptFd   = this.options.checkpointPath
+      ? fs.openSync(this.options.checkpointPath, 'a')
+      : null;
+
+    try {
+      while (queue.length > 0 && pagesDone <= maxPages) {
+        const { url, depth } = queue.shift()!;
+        if (visited.has(url) || seenChkpt.has(url)) continue;
+        visited.add(url);
+
+        const page = await browser.newPage();
+        try {
+          if (verbose) {
+            process.stderr.write(
+              `[HelpPortalFetcher] (${pagesDone + 1}) depth=${depth} ${url}\n`
+            );
+          }
+
+          await page.goto(url, { waitUntil: 'networkidle2', timeout: timeoutMs });
+          try {
+            await page.waitForSelector(contentSel, { timeout: Math.min(timeoutMs, 20_000) });
+          } catch { /* fall through */ }
+
+          // Discover child links before extracting content so we queue them
+          // even if the content extraction for THIS page fails.
+          if (depth < maxDepth) {
+            const links: string[] = await page.evaluate(
+              extractLinksFromPage,
+              urlPrefix
+            );
+            for (const link of links) {
+              if (!visited.has(link) && !seenChkpt.has(link)) {
+                queue.push({ url: link, depth: depth + 1 });
+              }
+            }
+          }
+
+          // Skip the root itself — it's an index, not a CDS view page.
+          if (url === rootUrl) continue;
+
+          // Extract CDS view content.
+          const extract = await page.evaluate(extractViewFromPage, contentSel, '');
+          const viewName = deriveViewName(extract.pageTitle, url);
+
+          const doc = this.toDocumentFromExtract(
+            {
+              viewName,
+              pageTitle: extract.pageTitle || viewName,
+              pageUrl:   url,
+              fields:    extract.fields,
+              bodyText:  extract.bodyText,
+              hasFields: extract.fields.length > 0
+            },
+            { viewName, url },
+            fetchedAt
+          );
+          docs.push(doc);
+
+          seeds.push({
+            viewName,
+            module:         null,
+            cleanCoreLevel: 'A',
+            title:          extract.pageTitle || viewName,
+            description:    extract.bodyText.slice(0, 2000),
+            url,
+            fields:         extract.fields,
+            metadata:       { crawledAt: fetchedAt, depth }
+          });
+
+          if (chkptFd != null) {
+            fs.writeSync(chkptFd, JSON.stringify({ url, viewName, fetchedAt }) + '\n');
+          }
+
+          pagesDone += 1;
+        } catch (err: any) {
+          if (verbose) {
+            process.stderr.write(`[HelpPortalFetcher] FAILED ${url}: ${err?.message ?? err}\n`);
+          }
+        } finally {
+          await page.close();
+        }
+
+        if (rateMs > 0 && queue.length > 0) await sleep(rateMs);
+      }
+    } finally {
+      if (chkptFd != null) fs.closeSync(chkptFd);
+      await browser.close();
+    }
+
+    // Persist to seed fixture so fixture-mode runs have fresh data.
+    this.writeSeedFixture(seeds, fetchedAt, rootUrl);
+
+    if (verbose) {
+      process.stderr.write(
+        `[HelpPortalFetcher] Crawl complete — ${docs.length} pages, ` +
+        `${seeds.filter(s => s.fields.length > 0).length} with field tables.\n`
+      );
+    }
+    return docs;
+  }
+
+  private writeSeedFixture(entries: HelpPortalSeedEntry[], fetchedAt: string, rootUrl: string): void {
+    const fixturePath = this.options.fixturePath ?? path.resolve(
+      __dirname, '..', '..', 'fixtures', 'help-portal-cds-seed.json'
+    );
+    const seed: HelpPortalSeedFile = {
+      _metadata: {
+        sourceVersion: 'help-portal-crawl-v1',
+        fetchedAt,
+        notes: `Auto-generated by HelpPortalFetcher crawl from ${rootUrl}. Re-run to refresh.`
+      },
+      entries
+    };
+    fs.writeFileSync(fixturePath, JSON.stringify(seed, null, 2), 'utf-8');
+    process.stderr.write(
+      `[HelpPortalFetcher] Wrote ${entries.length} entries to ${fixturePath}\n`
+    );
   }
 
   // -------------------------------------------------------------------
@@ -565,6 +739,68 @@ function renderBody(extract: ViewFieldExtract): string {
   }
 
   return head + lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// In-page link extractor — runs inside the browser context.
+// Returns all <a href> values whose href starts with urlPrefix and ends
+// with .html (same product/version subtree, no external links).
+// ---------------------------------------------------------------------------
+
+function extractLinksFromPage(urlPrefix: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const a of Array.from(document.querySelectorAll('a[href]'))) {
+    const href: string = (a as any).href ?? '';
+    // Normalise: strip hash fragment, ensure .html suffix.
+    const clean = href.split('#')[0];
+    if (
+      clean &&
+      clean.startsWith(urlPrefix) &&
+      clean.endsWith('.html') &&
+      !seen.has(clean)
+    ) {
+      seen.add(clean);
+      out.push(clean);
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Derive a CDS view name from the scraped page title or URL GUID fallback.
+ *  help.sap.com titling convention: "I_OutboundDelivery - SAP Online Help"
+ *  or "C_SalesOrderItemFS | SAP Help Portal". */
+function deriveViewName(pageTitle: string, pageUrl: string): string {
+  // Match token that looks like a released CDS view name:
+  //   starts with a letter, contains at least one underscore, camelCase OK.
+  const m = pageTitle.match(/\b([A-Z][A-Za-z0-9]{1,}(?:_[A-Za-z0-9]+)+)\b/);
+  if (m) return m[1];
+  // Fall back: first word before dash / pipe.
+  const first = pageTitle.split(/\s*[-|]\s*/)[0].trim();
+  if (first && first.length < 60) return first || 'UNKNOWN';
+  // Last resort: GUID from URL.
+  const urlM = pageUrl.match(/\/([a-f0-9]{20,})\.html$/i);
+  return urlM ? urlM[1].toUpperCase() : 'UNKNOWN';
+}
+
+/** Read already-completed URLs from a checkpoint file (JSON-lines).
+ *  Returns a Set of URL strings so the crawl can skip them. */
+function loadCrawlCheckpoint(checkpointPath: string | undefined): Set<string> {
+  const seen = new Set<string>();
+  if (!checkpointPath || !fs.existsSync(checkpointPath)) return seen;
+  const lines = fs.readFileSync(checkpointPath, 'utf-8').split('\n');
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as { url?: string };
+      if (entry.url) seen.add(entry.url);
+    } catch { /* ignore malformed lines */ }
+  }
+  return seen;
 }
 
 function sleep(ms: number): Promise<void> {
