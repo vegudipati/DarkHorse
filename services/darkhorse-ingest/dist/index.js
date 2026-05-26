@@ -38,7 +38,7 @@ function buildFetcher(source) {
         case 'sap-api-hub': return new SapApiHubFetcher_1.SapApiHubFetcher({ live: false });
         case 'sap-api-hub-edmx': return buildEdmxFetcher();
         case 'clean-core-guide': return new CleanCoreGuideFetcher_1.CleanCoreGuideFetcher({ live: false });
-        case 'architecture-center': return new ArchitectureCenterFetcher_1.ArchitectureCenterFetcher({ live: false });
+        case 'architecture-center': return buildArchitectureCenterFetcher();
         case 'help-portal-cds': return buildHelpPortalFetcher();
         default:
             throw new Error(`Unknown source "${source}". Known sources: ${KNOWN_SOURCES.join(', ')}`);
@@ -122,6 +122,57 @@ function buildHelpPortalFetcher() {
         chromePath: process.env.DARKHORSE_CHROME_PATH,
         checkpointPath: process.env.DARKHORSE_HELP_PORTAL_CHECKPOINT,
         verbose: true
+    });
+}
+/**
+ * ArchitectureCenterFetcher builder — honours env vars:
+ *   - DARKHORSE_ARCH_CENTER_LIVE=true|1     live headless-Chrome scrape
+ *   - DARKHORSE_ARCH_CENTER_URLS_FILE=<p>   JSON file with extra URL list
+ *                                           { "urls": ["https://..."] }
+ *   - DARKHORSE_CHROME_PATH=<exe>           override browser executable
+ *
+ * Default URL list: extracted from the existing seed fixture so a live run
+ * re-scrapes exactly the 9 priority reference architectures. Add more by
+ * pointing DARKHORSE_ARCH_CENTER_URLS_FILE at a JSON file with a "urls" array.
+ */
+function buildArchitectureCenterFetcher() {
+    const fs = require('fs');
+    const path = require('path');
+    const live = ['1', 'true', 'yes'].includes((process.env.DARKHORSE_ARCH_CENTER_LIVE ?? '').toLowerCase());
+    if (!live) {
+        return new ArchitectureCenterFetcher_1.ArchitectureCenterFetcher({ live: false });
+    }
+    // Build URL list: seed fixture URLs + any extras from URLS_FILE.
+    const seedPath = path.resolve(__dirname, '..', 'fixtures', 'architecture-center-seed.json');
+    const urlSet = new Set();
+    if (fs.existsSync(seedPath)) {
+        const seed = JSON.parse(fs.readFileSync(seedPath, 'utf-8'));
+        for (const e of seed.entries ?? []) {
+            if (e.url)
+                urlSet.add(e.url);
+        }
+    }
+    const extraFile = process.env.DARKHORSE_ARCH_CENTER_URLS_FILE;
+    if (extraFile) {
+        if (!fs.existsSync(extraFile)) {
+            throw new Error(`architecture-center: DARKHORSE_ARCH_CENTER_URLS_FILE not found at ${extraFile}`);
+        }
+        const extra = JSON.parse(fs.readFileSync(extraFile, 'utf-8'));
+        for (const u of extra.urls ?? []) {
+            if (u)
+                urlSet.add(u);
+        }
+    }
+    const urls = Array.from(urlSet);
+    if (urls.length === 0) {
+        throw new Error('architecture-center live=true: no URLs to scrape. ' +
+            'Ensure fixtures/architecture-center-seed.json has entries with url fields, ' +
+            'or set DARKHORSE_ARCH_CENTER_URLS_FILE.');
+    }
+    return new ArchitectureCenterFetcher_1.ArchitectureCenterFetcher({
+        live: true,
+        urls,
+        chromePath: process.env.DARKHORSE_CHROME_PATH
     });
 }
 function selectBackends(snapshotPath) {
@@ -424,6 +475,12 @@ Commands:
         DARKHORSE_API_HUB_EDMX_RATE_MS=500      ms between downloads
       Optional --snapshot writes a JSON snapshot for the verify command
       and later sessions.
+
+      architecture-center env vars (only needed for live mode):
+        DARKHORSE_ARCH_CENTER_LIVE=true          headless-Chrome scrape
+        DARKHORSE_ARCH_CENTER_URLS_FILE=<path>   extra URLs JSON { "urls": [...] }
+        DARKHORSE_CHROME_PATH=<optional browser exe override>
+        Default URLs come from fixtures/architecture-center-seed.json (9 entries).
 
       help-portal-cds env vars (only needed for live mode):
         DARKHORSE_HELP_PORTAL_LIVE=true
