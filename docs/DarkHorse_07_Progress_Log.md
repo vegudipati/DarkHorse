@@ -3,8 +3,8 @@
 > Running log of shipped work and pipeline. Update whenever we ship or change what's queued.
 
 **Last updated:** 2026-05-25
-**Current version:** v0.7.35 (MCP server uncommitted: knowledge-base expansion to ~66K entries)
-**Branch state:** 29 commits ahead of `origin/main` (not yet pushed)
+**Current version:** v0.7.35 (extension), MCP knowledge-base expansion committed at `511075e`
+**Branch state:** 31 commits ahead of `origin/main` (not yet pushed)
 
 ---
 
@@ -88,6 +88,7 @@ Spec: `docs/DarkHorse_06_CPI6_RAG_MCP.md`.
 |---|---|
 | 2026-05-25 | **MCP catalog: 38 → ~66K entries.** Wired SAP's official Cloudification Repository (github.com/SAP/abap-atc-cr-cv-s4hc) — 1,337 BAdIs, 7,566 CDS views, 311 BDEFs, 11,404 tables with successor recommendations. New `CloudificationCatalogProvider` + `TerminalStubProvider`. Chain: Static (curated) → Cloudification (comprehensive) → Azure (optional) → Terminal (heuristic). Smoke test confirms LIKP/LIPS/KNVV now return correct successors (I_DELIVERYDOCUMENT etc.) — the exact tables the ZOTC routing report unnecessarily wrapped in Z views. |
 | 2026-05-25 | **End-to-end verified:** existing grounders + verifier consume `alternatives[]` already — Cloudification successors flow through `get_cds_view` and `check_clean_core_level` with zero code changes. **MCP server restart required** to activate. |
+| 2026-05-25 | **Committed (`c9c3e31`):** MCP-side providers + `darkhorse-ingest refresh` CLI subcommand. **Committed (`511075e`):** 24 MB of vendored SAP cloudification JSON snapshot. |
 
 ---
 
