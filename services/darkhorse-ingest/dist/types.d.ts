@@ -15,8 +15,8 @@
  *   IVectorIndex.lookupByName  → exact-match (BAdI / exit / table name)
  *   IVectorIndex.searchSemantic → cosine similarity over the embedding
  */
-export type SourceId = 'SAP_API_HUB' | 'SAP_CLEAN_CORE_GUIDE' | 'SAP_ARCHITECTURE_CENTER' | 'SAP_HELP_PORTAL_CDS';
-export type SapObjectType = 'CDS' | 'BAPI' | 'BADI' | 'EXIT' | 'TABL' | 'BDEF' | 'DDLS' | 'CLAS' | 'PATTERN' | 'UNKNOWN';
+export type SourceId = 'SAP_API_HUB' | 'SAP_API_HUB_SEARCH' | 'SAP_CLEAN_CORE_GUIDE' | 'SAP_ARCHITECTURE_CENTER' | 'SAP_HELP_PORTAL_CDS';
+export type SapObjectType = 'CDS' | 'BAPI' | 'BADI' | 'EXIT' | 'TABL' | 'BDEF' | 'DDLS' | 'CLAS' | 'PATTERN' | 'API_ARTIFACT' | 'UNKNOWN';
 export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D';
 export interface IngestDocument {
     /** Stable cross-source id, e.g. "sap-api-hub/cds/I_SalesOrder" */

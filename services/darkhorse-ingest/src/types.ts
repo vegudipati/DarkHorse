@@ -25,6 +25,7 @@
 
 export type SourceId =
   | 'SAP_API_HUB'
+  | 'SAP_API_HUB_SEARCH'
   | 'SAP_CLEAN_CORE_GUIDE'
   | 'SAP_ARCHITECTURE_CENTER'
   | 'SAP_HELP_PORTAL_CDS';
@@ -33,6 +34,7 @@ export type SapObjectType =
   | 'CDS'    | 'BAPI'   | 'BADI'   | 'EXIT'
   | 'TABL'   | 'BDEF'   | 'DDLS'   | 'CLAS'
   | 'PATTERN'              // architectural pattern (not a concrete object)
+  | 'API_ARTIFACT'         // generic artifact from API Hub search (API, Integration, Event…)
   | 'UNKNOWN';
 
 export type CleanCoreLevel = 'A' | 'B' | 'C' | 'D';

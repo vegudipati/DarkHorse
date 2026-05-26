@@ -25,6 +25,8 @@ import { CleanCoreGuideFetcher }     from './fetchers/CleanCoreGuideFetcher';
 import { ArchitectureCenterFetcher } from './fetchers/ArchitectureCenterFetcher';
 import { HelpPortalFetcher,
          ViewTarget }                from './fetchers/HelpPortalFetcher';
+import { SapApiHubSearchFetcher,
+         DEFAULT_SEARCH_URLS }       from './fetchers/SapApiHubSearchFetcher';
 import { TokenChunker }              from './chunker/TokenChunker';
 import { MockEmbedder }              from './embedders/MockEmbedder';
 import { AzureOpenAiEmbedder }       from './embedders/AzureOpenAiEmbedder';
@@ -45,6 +47,7 @@ import {
 type SourceKey =
   | 'sap-api-hub'
   | 'sap-api-hub-edmx'
+  | 'sap-api-hub-search'
   | 'clean-core-guide'
   | 'architecture-center'
   | 'help-portal-cds'
@@ -53,6 +56,7 @@ type SourceKey =
 const KNOWN_SOURCES: Exclude<SourceKey, 'all'>[] = [
   'sap-api-hub',
   'sap-api-hub-edmx',
+  'sap-api-hub-search',
   'clean-core-guide',
   'architecture-center',
   'help-portal-cds'
@@ -62,6 +66,7 @@ function buildFetcher(source: Exclude<SourceKey, 'all'>): IFetcher {
   switch (source) {
     case 'sap-api-hub':         return new SapApiHubFetcher({ live: false });
     case 'sap-api-hub-edmx':    return buildEdmxFetcher();
+    case 'sap-api-hub-search':  return buildApiHubSearchFetcher();
     case 'clean-core-guide':    return new CleanCoreGuideFetcher({ live: false });
     case 'architecture-center': return buildArchitectureCenterFetcher();
     case 'help-portal-cds':     return buildHelpPortalFetcher();
@@ -115,6 +120,46 @@ function buildEdmxFetcher(): IFetcher {
     bearerToken:    process.env.DARKHORSE_API_HUB_BEARER,
     cookie:         process.env.DARKHORSE_API_HUB_COOKIE,
     diagnose,
+    verbose:        true
+  });
+}
+
+/**
+ * SapApiHubSearchFetcher builder — honours env vars:
+ *   - DARKHORSE_API_HUB_SEARCH_LIVE=true|1    live headless-Chrome scrape
+ *   - DARKHORSE_API_HUB_SEARCH_CATS=A,B,C     comma-separated category names
+ *                                             (default: all 9 tabs)
+ *   - DARKHORSE_API_HUB_SEARCH_MAX=N          max items per category (0=all)
+ *   - DARKHORSE_API_HUB_COOKIE=<cookie>       session cookie (if auth required)
+ *   - DARKHORSE_CHROME_PATH=<exe>             browser override
+ *
+ * Output: fixtures/api-hub-search-discovery.json (structured catalog) +
+ *         fixtures/api-hub-search-seed.json (fixture for replay).
+ */
+function buildApiHubSearchFetcher(): IFetcher {
+  const live = ['1', 'true', 'yes'].includes(
+    (process.env.DARKHORSE_API_HUB_SEARCH_LIVE ?? '').toLowerCase()
+  );
+
+  if (!live) {
+    return new SapApiHubSearchFetcher({ live: false });
+  }
+
+  const catsRaw  = process.env.DARKHORSE_API_HUB_SEARCH_CATS;
+  const categories = catsRaw
+    ? catsRaw.split(',').map(s => s.trim()).filter(Boolean)
+    : undefined;
+
+  const maxRaw = parseInt(process.env.DARKHORSE_API_HUB_SEARCH_MAX ?? '0', 10);
+  const maxItemsPerCat = isFinite(maxRaw) && maxRaw >= 0 ? maxRaw : 0;
+
+  return new SapApiHubSearchFetcher({
+    live:           true,
+    searchUrls:     DEFAULT_SEARCH_URLS,
+    categories,
+    maxItemsPerCat,
+    cookie:         process.env.DARKHORSE_API_HUB_COOKIE,
+    chromePath:     process.env.DARKHORSE_CHROME_PATH,
     verbose:        true
   });
 }
@@ -652,6 +697,16 @@ Commands:
         DARKHORSE_API_HUB_EDMX_RATE_MS=500      ms between downloads
       Optional --snapshot writes a JSON snapshot for the verify command
       and later sessions.
+
+      sap-api-hub-search — full catalog scrape via the 9 search tabs.
+      Discovers ALL APIs, CDS Views, Integration Flows, Events, etc.
+      Writes fixtures/api-hub-search-discovery.json (OData service names
+      feed directly into the EdmxFetcher for bulk field-schema download).
+        DARKHORSE_API_HUB_SEARCH_LIVE=true      enable live scrape
+        DARKHORSE_API_HUB_SEARCH_CATS=APIs,CDS Views  specific tabs only
+        DARKHORSE_API_HUB_SEARCH_MAX=N          cap items per category
+        DARKHORSE_API_HUB_COOKIE=<cookie>       session cookie (if needed)
+        DARKHORSE_CHROME_PATH=<exe>             browser override
 
       architecture-center env vars (only needed for live mode):
         DARKHORSE_ARCH_CENTER_LIVE=true          headless-Chrome scrape of ALL
