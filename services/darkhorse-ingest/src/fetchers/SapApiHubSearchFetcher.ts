@@ -189,9 +189,13 @@ export class SapApiHubSearchFetcher implements IFetcher {
 
         const page = await browser.newPage();
         try {
-          // Inject auth cookie if provided.
+          // Inject auth cookies as real browser cookies (not just HTTP headers)
+          // so the SPA's internal token-refresh requests also carry them.
           if (this.options.cookie) {
-            await page.setExtraHTTPHeaders({ Cookie: this.options.cookie });
+            const cookieObjects = parseCookieString(this.options.cookie, 'api.sap.com');
+            if (cookieObjects.length > 0) {
+              await page.setCookie(...cookieObjects);
+            }
           }
 
           await page.goto(url, { waitUntil: 'networkidle2', timeout: timeoutMs });
@@ -427,4 +431,22 @@ function defaultDiscoveryPath(): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Parse a `Cookie: k=v; k2=v2` string into puppeteer CookieParam objects. */
+function parseCookieString(
+  cookieStr: string,
+  domain: string
+): import('puppeteer-core').CookieParam[] {
+  return cookieStr
+    .split(';')
+    .map(pair => {
+      const eq = pair.indexOf('=');
+      if (eq === -1) return null;
+      const name  = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1).trim();
+      if (!name) return null;
+      return { name, value, domain, path: '/', secure: true } as import('puppeteer-core').CookieParam;
+    })
+    .filter((c): c is import('puppeteer-core').CookieParam => c !== null);
 }

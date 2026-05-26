@@ -100,9 +100,13 @@ class SapApiHubSearchFetcher {
                     process.stderr.write(`[SearchFetcher] Category: ${category} → ${url}\n`);
                 const page = await browser.newPage();
                 try {
-                    // Inject auth cookie if provided.
+                    // Inject auth cookies as real browser cookies (not just HTTP headers)
+                    // so the SPA's internal token-refresh requests also carry them.
                     if (this.options.cookie) {
-                        await page.setExtraHTTPHeaders({ Cookie: this.options.cookie });
+                        const cookieObjects = parseCookieString(this.options.cookie, 'api.sap.com');
+                        if (cookieObjects.length > 0) {
+                            await page.setCookie(...cookieObjects);
+                        }
                     }
                     await page.goto(url, { waitUntil: 'networkidle2', timeout: timeoutMs });
                     // Wait for at least one result card to appear.
@@ -304,5 +308,21 @@ function defaultDiscoveryPath() {
 }
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+/** Parse a `Cookie: k=v; k2=v2` string into puppeteer CookieParam objects. */
+function parseCookieString(cookieStr, domain) {
+    return cookieStr
+        .split(';')
+        .map(pair => {
+        const eq = pair.indexOf('=');
+        if (eq === -1)
+            return null;
+        const name = pair.slice(0, eq).trim();
+        const value = pair.slice(eq + 1).trim();
+        if (!name)
+            return null;
+        return { name, value, domain, path: '/', secure: true };
+    })
+        .filter((c) => c !== null);
 }
 //# sourceMappingURL=SapApiHubSearchFetcher.js.map
