@@ -2,25 +2,24 @@
 
 > Running log of shipped work and pipeline. Update whenever we ship or change what's queued.
 
-**Last updated:** 2026-05-25
-**Current version:** v0.7.35 (extension), MCP knowledge-base expansion committed at `511075e`
-**Branch state:** 31 commits ahead of `origin/main` (not yet pushed)
+**Last updated:** 2026-05-26
+**Current version:** v0.7.35 (extension), MCP field-catalog wiring committed at HEAD
+**Branch state:** pushed to `origin/main` through 2026-05-25; HelpPortalFetcher commit pending push
 
 ---
 
 ## In Progress
 
-- **Knowledge-base expansion ("A12-K1")** — wiring SAP's official Cloudification Repository into MCP. Provider built + smoke-tested; grounders + verifiers still need to surface successor[] alternatives in their prompt blocks.
+- **HelpPortalFetcher first live run** — framework is committed; needs the user to run with `DARKHORSE_HELP_PORTAL_LIVE=true` and verify the help.sap.com URL pattern. Fixing the URLs unlocks field metadata for the 18 seed views; we then expand toward the full 7,566 CDS view set.
 
 ## Pipeline (Not Started)
 
-- **HelpPortalFetcher** — pull per-CDS-view field metadata + per-BAdI method signatures from help.sap.com so the LLM stops guessing column names.
-- **Pin live URLs for existing fetchers** (SapApiHubFetcher / CleanCoreGuideFetcher / ArchitectureCenterFetcher all default `live:false`).
-- **Wire grounders to expanded catalog** — surface `successors[]` in TDS / Code Agent grounding blocks so LLM picks the right released CDS view.
-- **Hand-curate baseline expansion** from training-data knowledge (lower priority now that Cloudification gives us ~66K entries).
-- **Sprint 7 — Agent Marketplace** — publish specialized SD / MM / FI agents backed by MCP (per `docs/DarkHorse_06_CPI6_RAG_MCP.md` §Sprint 7).
-- **Verify v0.7.35 timeout fix** end-to-end through the VS Code pipeline.
-- **Push 29 commits to `origin/main`** (awaiting user confirmation).
+- **Verify help-portal URL pattern + populate first batch** — once one URL works, the others typically follow; add a discovery step that walks help.sap.com's sitemap to map view-name → URL automatically.
+- **SapApiHubFetcher live path** — api.sap.com OData catalog is public at `/odata/1.0/catalog.svc/`. Add EDMX / OpenAPI download path for BAPI parameter lists.
+- **Architecture Center live mode** — flip `live: true` on existing fetcher.
+- **LearningPortalFetcher** — lowest priority.
+- **Sprint 7 — Agent Marketplace** — per `docs/DarkHorse_06_CPI6_RAG_MCP.md` §Sprint 7.
+- **Push HelpPortalFetcher commit to `origin/main`** when ready.
 
 ---
 
@@ -89,6 +88,7 @@ Spec: `docs/DarkHorse_06_CPI6_RAG_MCP.md`.
 | 2026-05-25 | **MCP catalog: 38 → ~66K entries.** Wired SAP's official Cloudification Repository (github.com/SAP/abap-atc-cr-cv-s4hc) — 1,337 BAdIs, 7,566 CDS views, 311 BDEFs, 11,404 tables with successor recommendations. New `CloudificationCatalogProvider` + `TerminalStubProvider`. Chain: Static (curated) → Cloudification (comprehensive) → Azure (optional) → Terminal (heuristic). Smoke test confirms LIKP/LIPS/KNVV now return correct successors (I_DELIVERYDOCUMENT etc.) — the exact tables the ZOTC routing report unnecessarily wrapped in Z views. |
 | 2026-05-25 | **End-to-end verified:** existing grounders + verifier consume `alternatives[]` already — Cloudification successors flow through `get_cds_view` and `check_clean_core_level` with zero code changes. **MCP server restart required** to activate. |
 | 2026-05-25 | **Committed (`c9c3e31`):** MCP-side providers + `darkhorse-ingest refresh` CLI subcommand. **Committed (`511075e`):** 24 MB of vendored SAP cloudification JSON snapshot. |
+| 2026-05-26 | **HelpPortalFetcher + CDS field catalog committed.** New puppeteer-core scraper for help.sap.com CDS reference pages. New `CdsFieldCatalogProvider` exposes per-view field arrays. `get_cds_view` tool now returns `fieldsDetail[]`. CodeAgentGrounder + TdsAgentGrounder render field tables in their prompt blocks. Initial targets file seeded with 18 views from the failing pipelines + canonical SD/MM/FI/BP views. **URLs are educated guesses — first live run needs URL-pattern verification.** Goal: kill the `ktokk`/invented-LIKP-columns class of hallucinations. |
 
 ---
 
