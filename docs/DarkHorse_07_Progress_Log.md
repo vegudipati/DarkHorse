@@ -10,7 +10,7 @@
 
 ## In Progress
 
-- **EDMX live run** — `node services/darkhorse-ingest/dist/index.js ingest sap-api-hub-edmx` with `DARKHORSE_API_HUB_EDMX_LIVE=true`. First run will probe what api.sap.com's catalog returns; the fetcher has defensive fallbacks for ContentType/URL property variants. Adjust based on what comes back.
+- **EDMX live run** — api.sap.com gates `$metadata` behind login. Use diagnose mode with API key to confirm auth, then run full ingest. See §Knowledge-base expansion for env var details.
 
 ## Pipeline (Not Started)
 
@@ -87,7 +87,7 @@ Spec: `docs/DarkHorse_06_CPI6_RAG_MCP.md`.
 | 2026-05-25 | **End-to-end verified:** existing grounders + verifier consume `alternatives[]` already — Cloudification successors flow through `get_cds_view` and `check_clean_core_level` with zero code changes. **MCP server restart required** to activate. |
 | 2026-05-25 | **Committed (`c9c3e31`):** MCP-side providers + `darkhorse-ingest refresh` CLI subcommand. **Committed (`511075e`):** 24 MB of vendored SAP cloudification JSON snapshot. |
 | 2026-05-26 | **HelpPortalFetcher + CDS field catalog committed.** New puppeteer-core scraper for help.sap.com CDS reference pages. New `CdsFieldCatalogProvider` exposes per-view field arrays. `get_cds_view` tool now returns `fieldsDetail[]`. CodeAgentGrounder + TdsAgentGrounder render field tables in their prompt blocks. |
-| 2026-05-26 | **SapApiHubEdmxFetcher committed.** Bulk field-metadata path replacing manual URL collection — walks api.sap.com OData catalog, downloads each released service's `$metadata` EDMX, regex-parses CSDL entity schemas. ~500 EDMX files cover ~7K views in one pass. Also harvests BAPI parameter signatures + OData service entities (closes the original SapApiHubFetcher live-path task). Manual 18-view targets file removed in favor of auto-discovery. Parser smoke-tested on synthetic CSDL. |
+| 2026-05-26 | **SapApiHubEdmxFetcher committed.** Bulk field-metadata via direct `$metadata` download — curated 25-service SD/MM/FI/PP list (`DEFAULT_SERVICE_NAMES`), no catalog discovery (api.sap.com OData catalog endpoint returns SPA HTML). Auth support: `APIKey` / `Bearer` / `Cookie` headers. Diagnose mode fetches one service + prints full response for auth iteration. Env vars: `DARKHORSE_API_HUB_API_KEY`, `DARKHORSE_API_HUB_BEARER`, `DARKHORSE_API_HUB_COOKIE`, `DARKHORSE_API_HUB_EDMX_DIAGNOSE`. |
 
 ---
 
