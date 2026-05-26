@@ -98,3 +98,4 @@ Spec: `docs/DarkHorse_06_CPI6_RAG_MCP.md`.
 - **Move queued items up.** When an item starts, move it from _Pipeline_ to _In Progress_; when it ships, move it down to _Completed_.
 - **Date format:** `YYYY-MM-DD`.
 - **Source of truth for sprint design** stays in `docs/DarkHorse_06_CPI6_RAG_MCP.md`. This file tracks *status*, not *design*.
+- **Knowledge base coverage assessment** lives in `docs/DarkHorse_08_KB_Assessment.md`. Update the table whenever a new source is ingested or a blocker is resolved.
