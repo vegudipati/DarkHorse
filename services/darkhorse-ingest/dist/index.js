@@ -22,6 +22,7 @@ const CleanCoreGuideFetcher_1 = require("./fetchers/CleanCoreGuideFetcher");
 const ArchitectureCenterFetcher_1 = require("./fetchers/ArchitectureCenterFetcher");
 const HelpPortalFetcher_1 = require("./fetchers/HelpPortalFetcher");
 const SapApiHubSearchFetcher_1 = require("./fetchers/SapApiHubSearchFetcher");
+const SapApiHubCatalogFetcher_1 = require("./fetchers/SapApiHubCatalogFetcher");
 const TokenChunker_1 = require("./chunker/TokenChunker");
 const MockEmbedder_1 = require("./embedders/MockEmbedder");
 const AzureOpenAiEmbedder_1 = require("./embedders/AzureOpenAiEmbedder");
@@ -31,6 +32,7 @@ const KNOWN_SOURCES = [
     'sap-api-hub',
     'sap-api-hub-edmx',
     'sap-api-hub-search',
+    'sap-api-hub-catalog',
     'clean-core-guide',
     'architecture-center',
     'help-portal-cds'
@@ -40,6 +42,7 @@ function buildFetcher(source) {
         case 'sap-api-hub': return new SapApiHubFetcher_1.SapApiHubFetcher({ live: false });
         case 'sap-api-hub-edmx': return buildEdmxFetcher();
         case 'sap-api-hub-search': return buildApiHubSearchFetcher();
+        case 'sap-api-hub-catalog': return buildApiHubCatalogFetcher();
         case 'clean-core-guide': return new CleanCoreGuideFetcher_1.CleanCoreGuideFetcher({ live: false });
         case 'architecture-center': return buildArchitectureCenterFetcher();
         case 'help-portal-cds': return buildHelpPortalFetcher();
@@ -118,6 +121,35 @@ function buildApiHubSearchFetcher() {
         maxItemsPerCat,
         cookie: process.env.DARKHORSE_API_HUB_COOKIE,
         chromePath: process.env.DARKHORSE_CHROME_PATH,
+        verbose: true
+    });
+}
+/**
+ * SapApiHubCatalogFetcher builder — honours env vars:
+ *   - DARKHORSE_API_HUB_APIKEY=<key>              required for live mode
+ *   - DARKHORSE_API_HUB_CATALOG_LIVE=true|1       enable live OData paging
+ *   - DARKHORSE_API_HUB_CATALOG_SETS=APIs,ContentPackages  subset (default both)
+ *   - DARKHORSE_API_HUB_CATALOG_MAX=N             max records per set (0=all)
+ *
+ * Output: fixtures/api-hub-catalog.json (raw catalog snapshot for replay).
+ */
+function buildApiHubCatalogFetcher() {
+    const live = ['1', 'true', 'yes'].includes((process.env.DARKHORSE_API_HUB_CATALOG_LIVE ?? '').toLowerCase());
+    const apiKey = process.env.DARKHORSE_API_HUB_APIKEY ?? '';
+    if (live && !apiKey) {
+        throw new Error('DARKHORSE_API_HUB_APIKEY is required for sap-api-hub-catalog live mode.');
+    }
+    const setsRaw = process.env.DARKHORSE_API_HUB_CATALOG_SETS;
+    const entitySets = setsRaw
+        ? setsRaw.split(',').map(s => s.trim()).filter(Boolean)
+        : undefined;
+    const maxRaw = parseInt(process.env.DARKHORSE_API_HUB_CATALOG_MAX ?? '0', 10);
+    const maxRecs = isFinite(maxRaw) && maxRaw >= 0 ? maxRaw : 0;
+    return new SapApiHubCatalogFetcher_1.SapApiHubCatalogFetcher({
+        apiKey,
+        live,
+        entitySets,
+        maxRecords: maxRecs,
         verbose: true
     });
 }
@@ -542,6 +574,14 @@ Commands:
         DARKHORSE_API_HUB_EDMX_RATE_MS=500      ms between downloads
       Optional --snapshot writes a JSON snapshot for the verify command
       and later sessions.
+
+      sap-api-hub-catalog — full catalog via OData API (no browser needed).
+      Pages through 5,230 APIs and 2,100 integration packages using an API key.
+      Writes fixtures/api-hub-catalog.json for offline replay.
+        DARKHORSE_API_HUB_APIKEY=<key>          required for live mode
+        DARKHORSE_API_HUB_CATALOG_LIVE=true     enable live paging
+        DARKHORSE_API_HUB_CATALOG_SETS=APIs,ContentPackages  subset
+        DARKHORSE_API_HUB_CATALOG_MAX=N         cap records per set
 
       sap-api-hub-search — full catalog scrape via the 9 search tabs.
       Discovers ALL APIs, CDS Views, Integration Flows, Events, etc.
