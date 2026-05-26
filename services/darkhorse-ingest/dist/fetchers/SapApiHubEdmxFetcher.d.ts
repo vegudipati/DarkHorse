@@ -66,12 +66,11 @@ export interface EdmxEntityExtract {
 }
 export interface SapApiHubEdmxFetcherOptions {
     live?: boolean;
-    /** Base URL of the OData catalog. Defaults to the public one. */
-    catalogBaseUrl?: string;
-    /** Comma-separated service-name filter — only fetch EDMX for these services.
-     *  Useful for incremental runs / debugging. When unset, fetches every
-     *  service the catalog returns. */
-    serviceFilter?: string[];
+    /** Override the curated service-name list. Each entry is a service name
+     *  like 'API_SALES_ORDER_SRV' — the fetcher tries
+     *  https://api.sap.com/api/<name>/$metadata for each. Defaults to a
+     *  hand-curated SD/MM/FI/PP set (DEFAULT_SERVICE_NAMES). */
+    serviceNames?: string[];
     /** Per-EDMX timeout in ms. Default 20s. */
     pageTimeoutMs?: number;
     /** Milliseconds between EDMX downloads to be polite to api.sap.com.
@@ -85,8 +84,30 @@ export interface SapApiHubEdmxFetcherOptions {
     checkpointPath?: string;
     /** Override fixture path for tests / replay. */
     fixturePath?: string;
+    /** Authentication. api.sap.com gates EDMX downloads behind a login wall —
+     *  anonymous requests get back the SPA landing page (HTML), not XML.
+     *  Provide ONE of:
+     *    - apiKey      → adds `APIKey: <key>` header (api.sap.com personal API key)
+     *    - bearerToken → adds `Authorization: Bearer <token>` (OAuth2)
+     *    - cookie      → adds `Cookie: <verbatim cookie string>` (session-based)
+     *  When more than one is set, all are sent. */
+    apiKey?: string;
+    bearerToken?: string;
+    cookie?: string;
+    /** Diagnostic mode: fetch the first service only, print full headers and
+     *  the first 500 chars of the body, then exit. Used to iterate on auth
+     *  config without scraping 500 services blind. */
+    diagnose?: boolean;
     verbose?: boolean;
 }
+/**
+ * Curated starter list of well-known released S/4HANA Cloud OData services.
+ * Covers SD / MM / FI / PP / Master Data / BP — the modules our test pipelines
+ * exercise. Override via options.serviceNames or
+ * DARKHORSE_API_HUB_EDMX_SERVICES env var. Each name maps to a documented
+ * api.sap.com package and its $metadata URL.
+ */
+export declare const DEFAULT_SERVICE_NAMES: string[];
 export declare class SapApiHubEdmxFetcher implements IFetcher {
     private readonly options;
     readonly id: SourceId;
@@ -95,8 +116,7 @@ export declare class SapApiHubEdmxFetcher implements IFetcher {
     fetch(): Promise<IngestDocument[]>;
     private fetchFromFixture;
     private fetchLive;
-    private listServices;
-    private downloadEdmx;
+    private buildAuthHeaders;
     private snapshotEntryToDocument;
 }
 interface ParsedEntity {

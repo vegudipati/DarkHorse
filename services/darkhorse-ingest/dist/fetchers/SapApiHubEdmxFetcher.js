@@ -46,14 +46,56 @@
  */
 'use strict';
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SapApiHubEdmxFetcher = void 0;
+exports.SapApiHubEdmxFetcher = exports.DEFAULT_SERVICE_NAMES = void 0;
 exports.parseEdmx = parseEdmx;
 const fs = require("fs");
 const path = require("path");
+/**
+ * Curated starter list of well-known released S/4HANA Cloud OData services.
+ * Covers SD / MM / FI / PP / Master Data / BP — the modules our test pipelines
+ * exercise. Override via options.serviceNames or
+ * DARKHORSE_API_HUB_EDMX_SERVICES env var. Each name maps to a documented
+ * api.sap.com package and its $metadata URL.
+ */
+exports.DEFAULT_SERVICE_NAMES = [
+    // Sales — OTC
+    'API_SALES_ORDER_SRV',
+    'API_SALES_ORDER_SIMULATION_SRV',
+    'API_BILLING_DOCUMENT_SRV',
+    'API_SALES_QUOTATION_SRV',
+    'API_SALES_CONTRACT_SRV',
+    // Logistics — outbound delivery
+    'API_OUTBOUND_DELIVERY_SRV',
+    'API_OUTBOUND_DELIVERY_V2_SRV',
+    // Purchasing — PTP
+    'API_PURCHASEORDER_PROCESS_SRV',
+    'API_PURCHASEREQ_PROCESS_SRV',
+    'API_PURCHASECONTRACT_PROCESS_SRV',
+    'API_SUPPLIERINVOICE_PROCESS_SRV',
+    // Inventory + material movement
+    'API_MATERIAL_DOCUMENT_SRV',
+    'API_PHYSICAL_INVENTORY_DOC_SRV',
+    // Master data
+    'API_PRODUCT_SRV',
+    'API_BUSINESS_PARTNER',
+    'API_CUSTOMER_MATERIAL_SRV',
+    // Finance — FI
+    'API_JOURNALENTRYITEMBASIC_SRV',
+    'API_OPLACCTGDOCITEMCUBE_SRV',
+    'API_ACCOUNTINGDOCUMENT_SRV',
+    // Production planning
+    'API_PRODUCTION_ORDER_SRV',
+    'API_PROCESS_ORDER_SRV',
+    // Supplier & sourcing
+    'API_SUPPLIERQUOTATION_PROCESS_SRV',
+    // Pricing
+    'API_SLSPRCGCNDNRECD_SRV',
+    // Plant & operations
+    'API_PLANT_SRV'
+];
 // ---------------------------------------------------------------------------
 // Fetcher
 // ---------------------------------------------------------------------------
-const DEFAULT_CATALOG_BASE = 'https://api.sap.com/odata/1.0/catalog.svc';
 class SapApiHubEdmxFetcher {
     options;
     id = 'SAP_API_HUB';
@@ -84,29 +126,33 @@ class SapApiHubEdmxFetcher {
     // Live path — discovery + bulk download + parse
     // -------------------------------------------------------------------
     async fetchLive() {
-        const catalogBase = (this.options.catalogBaseUrl ?? DEFAULT_CATALOG_BASE).replace(/\/+$/, '');
         const timeoutMs = this.options.pageTimeoutMs ?? 20_000;
         const rateLimitMs = this.options.rateLimitMs ?? 500;
         const verbose = this.options.verbose ?? false;
         const maxServices = this.options.maxServices ?? 0;
-        // 1. Discover services. The OData catalog at api.sap.com publishes an
-        //    APIs entity set containing released APIs. We page through it with
-        //    $top/$skip so we don't hit a single huge response.
-        if (verbose)
-            process.stderr.write(`[EdmxFetcher] Discovering services from ${catalogBase}\n`);
-        const services = await this.listServices(catalogBase, timeoutMs, verbose);
-        let queue = services.filter(s => isOdataServiceLikely(s));
-        if (this.options.serviceFilter && this.options.serviceFilter.length > 0) {
-            const allow = new Set(this.options.serviceFilter.map(n => n.trim().toUpperCase()));
-            queue = queue.filter(s => allow.has(s.name.trim().toUpperCase()));
-        }
-        if (maxServices > 0 && queue.length > maxServices) {
-            queue = queue.slice(0, maxServices);
-        }
+        const diagnose = this.options.diagnose ?? false;
+        const authHeaders = this.buildAuthHeaders();
         if (verbose) {
-            process.stderr.write(`[EdmxFetcher] ${services.length} services in catalog, ${queue.length} after OData/filter prune\n`);
+            const used = Object.keys(authHeaders);
+            process.stderr.write(used.length === 0
+                ? `[EdmxFetcher] WARNING: no auth headers configured. api.sap.com gates EDMX behind login — expect HTML responses.\n`
+                : `[EdmxFetcher] Auth headers: ${used.join(', ')}\n`);
         }
-        // 2. For each service, download EDMX, parse entities.
+        // Service list. api.sap.com's OData catalog endpoint (.../catalog.svc/APIs)
+        // returns SPA HTML rather than queryable data, so we don't try to discover
+        // services from it. Instead, walk a curated list (override via env or
+        // options) and hit each service's /$metadata directly.
+        let queue = (this.options.serviceNames && this.options.serviceNames.length > 0
+            ? this.options.serviceNames
+            : exports.DEFAULT_SERVICE_NAMES).slice();
+        if (maxServices > 0 && queue.length > maxServices)
+            queue = queue.slice(0, maxServices);
+        if (diagnose)
+            queue = queue.slice(0, 1);
+        if (verbose) {
+            process.stderr.write(`[EdmxFetcher] ${queue.length} service${queue.length === 1 ? '' : 's'} in queue` +
+                (diagnose ? ' (diagnose mode — first service only)\n' : '\n'));
+        }
         const docs = [];
         const allEntries = [];
         const seenChkpt = loadCheckpointSeen(this.options.checkpointPath);
@@ -116,33 +162,45 @@ class SapApiHubEdmxFetcher {
         const fetchedAt = new Date().toISOString();
         try {
             let idx = 0;
-            for (const service of queue) {
+            for (const serviceName of queue) {
                 idx += 1;
-                if (seenChkpt.has(service.name)) {
+                if (seenChkpt.has(serviceName)) {
                     if (verbose)
-                        process.stderr.write(`[EdmxFetcher] (${idx}/${queue.length}) ${service.name} — skipped (checkpointed)\n`);
+                        process.stderr.write(`[EdmxFetcher] (${idx}/${queue.length}) ${serviceName} — skipped (checkpointed)\n`);
                     continue;
                 }
+                const edmxUrl = `https://api.sap.com/api/${encodeURIComponent(serviceName)}/$metadata`;
                 if (verbose)
-                    process.stderr.write(`[EdmxFetcher] (${idx}/${queue.length}) ${service.name}\n`);
+                    process.stderr.write(`[EdmxFetcher] (${idx}/${queue.length}) ${serviceName} ← ${edmxUrl}\n`);
                 try {
-                    const edmxText = await this.downloadEdmx(service, timeoutMs);
-                    const entities = parseEdmx(edmxText);
+                    const fetchRes = await fetchWithDiagnostics(edmxUrl, timeoutMs, authHeaders);
+                    if (diagnose) {
+                        process.stderr.write(`[EdmxFetcher] diagnose — HTTP ${fetchRes.status} ${fetchRes.statusText}\n`);
+                        process.stderr.write(`[EdmxFetcher] diagnose — content-type: ${fetchRes.contentType ?? '(none)'}\n`);
+                        process.stderr.write(`[EdmxFetcher] diagnose — body[0..500]:\n${fetchRes.text.slice(0, 500)}\n---\n`);
+                    }
+                    if (!looksLikeEdmx(fetchRes.text)) {
+                        const reason = fetchRes.text.slice(0, 120).replace(/\s+/g, ' ');
+                        throw new Error(`Response is not EDMX XML (got ${fetchRes.contentType ?? 'unknown content-type'}): ${reason}`);
+                    }
+                    const entities = parseEdmx(fetchRes.text);
                     for (const ent of entities) {
                         const entry = {
                             viewName: ent.name,
-                            serviceName: service.name,
-                            serviceUrl: service.detailUrl,
-                            edmxUrl: service.edmxUrl ?? '',
+                            serviceName,
+                            serviceUrl: `https://api.sap.com/api/${serviceName}`,
+                            edmxUrl,
                             fields: ent.fields,
                             fetchedAt
                         };
                         allEntries.push(entry);
                         docs.push(this.snapshotEntryToDocument(entry));
                     }
+                    if (verbose)
+                        process.stderr.write(`[EdmxFetcher]     parsed ${entities.length} entity types\n`);
                     if (checkpointFd != null) {
                         fs.writeSync(checkpointFd, JSON.stringify({
-                            serviceName: service.name,
+                            serviceName,
                             entityCount: entities.length,
                             fetchedAt: new Date().toISOString()
                         }) + '\n');
@@ -150,7 +208,7 @@ class SapApiHubEdmxFetcher {
                 }
                 catch (err) {
                     if (verbose)
-                        process.stderr.write(`[EdmxFetcher] FAILED ${service.name}: ${err?.message ?? err}\n`);
+                        process.stderr.write(`[EdmxFetcher] FAILED ${serviceName}: ${err?.message ?? err}\n`);
                     // Per-service failure is non-fatal — keep going.
                 }
                 if (rateLimitMs > 0 && idx < queue.length) {
@@ -166,12 +224,12 @@ class SapApiHubEdmxFetcher {
         const snapshotPath = path.resolve(__dirname, '..', '..', 'fixtures', 'api-sap-hub-edmx.snapshot.json');
         const snap = {
             _metadata: {
-                sourceVersion: 'sap-api-hub-edmx-v1',
+                sourceVersion: 'sap-api-hub-edmx-v2-direct',
                 fetchedAt,
-                catalogBaseUrl: catalogBase,
+                catalogBaseUrl: 'https://api.sap.com/api',
                 serviceCount: queue.length,
                 entityCount: allEntries.length,
-                notes: 'Auto-generated by SapApiHubEdmxFetcher live run. Re-run to refresh.'
+                notes: 'Auto-generated by SapApiHubEdmxFetcher (direct /$metadata mode). Re-run to refresh.'
             },
             entries: allEntries
         };
@@ -183,72 +241,24 @@ class SapApiHubEdmxFetcher {
         return docs;
     }
     // -------------------------------------------------------------------
-    // Catalog discovery — list services from the OData catalog with paging.
+    // Auth header builder
     //
-    // The schema of api.sap.com's OData catalog is documented at
-    // $metadata; we treat the response defensively because property names
-    // have changed historically (Title vs Name, Path vs DetailURL, etc.).
+    // api.sap.com gates EDMX behind login. We support three concurrent
+    // mechanisms so users with different account types can pick whichever
+    // their org supports:
+    //   - APIKey header (api.sap.com personal API key — simplest)
+    //   - Authorization: Bearer <token> (OAuth2)
+    //   - Cookie: <verbatim> (session-based, extracted from browser)
     // -------------------------------------------------------------------
-    async listServices(catalogBase, timeoutMs, verbose) {
-        const pageSize = 200;
-        const out = [];
-        for (let skip = 0;; skip += pageSize) {
-            const url = `${catalogBase}/APIs?$top=${pageSize}&$skip=${skip}&$format=json`;
-            const page = await fetchJsonWithTimeout(url, timeoutMs);
-            // OData v1 typically nests under d.results. Accept either shape.
-            const arr = Array.isArray(page?.d?.results) ? page.d.results :
-                Array.isArray(page?.value) ? page.value :
-                    Array.isArray(page) ? page :
-                        [];
-            if (arr.length === 0)
-                break;
-            for (const row of arr) {
-                const name = (row?.Name ?? row?.Title ?? row?.ID ?? '').toString().trim();
-                const detailUrl = (row?.DetailURL ?? row?.url ?? '').toString();
-                // The EDMX url may be a sibling property OR a path off the service.
-                // Try both shapes — defensive.
-                const edmxCandidate = row?.EDMXLink ??
-                    row?.Specifications?.find?.((s) => /edmx/i.test(s?.Type ?? ''))?.URL;
-                if (!name)
-                    continue;
-                out.push({
-                    name,
-                    detailUrl,
-                    contentType: (row?.ContentType ?? '').toString(),
-                    edmxUrl: edmxCandidate
-                });
-            }
-            if (verbose)
-                process.stderr.write(`[EdmxFetcher] catalog page +${arr.length} (total ${out.length})\n`);
-            if (arr.length < pageSize)
-                break;
-        }
-        return out;
-    }
-    // -------------------------------------------------------------------
-    // EDMX download — try the catalog-supplied URL first, then known
-    // fallback patterns. Returns the raw XML text.
-    // -------------------------------------------------------------------
-    async downloadEdmx(service, timeoutMs) {
-        const candidates = [];
-        if (service.edmxUrl)
-            candidates.push(service.edmxUrl);
-        // Conventional pattern: /api/<NAME>/$metadata
-        candidates.push(`https://api.sap.com/api/${encodeURIComponent(service.name)}/$metadata`);
-        // Alternative path observed historically:
-        candidates.push(`https://api.sap.com/api/${encodeURIComponent(service.name)}/odata/spec`);
-        let lastErr = null;
-        for (const url of candidates) {
-            try {
-                const text = await fetchTextWithTimeout(url, timeoutMs);
-                if (looksLikeEdmx(text))
-                    return text;
-            }
-            catch (err) {
-                lastErr = err instanceof Error ? err : new Error(String(err));
-            }
-        }
-        throw lastErr ?? new Error(`EDMX not found for service ${service.name}`);
+    buildAuthHeaders() {
+        const headers = {};
+        if (this.options.apiKey)
+            headers['APIKey'] = this.options.apiKey;
+        if (this.options.bearerToken)
+            headers['Authorization'] = `Bearer ${this.options.bearerToken}`;
+        if (this.options.cookie)
+            headers['Cookie'] = this.options.cookie;
+        return headers;
     }
     // -------------------------------------------------------------------
     // Document shaping
@@ -368,25 +378,25 @@ function attrFrom(attrStr, attrName) {
     const m = attrStr.match(rx);
     return m ? m[1] : null;
 }
-// ---------------------------------------------------------------------------
-// HTTP helpers — Node 20+ native fetch with absolute timeout
-// ---------------------------------------------------------------------------
-async function fetchJsonWithTimeout(url, timeoutMs) {
-    const text = await fetchTextWithTimeout(url, timeoutMs, { Accept: 'application/json' });
-    return JSON.parse(text);
-}
-async function fetchTextWithTimeout(url, timeoutMs, extraHeaders = {}) {
+async function fetchWithDiagnostics(url, timeoutMs, authHeaders) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const res = await fetch(url, {
             signal: controller.signal,
-            headers: { 'User-Agent': 'DarkHorse-Ingest/1.0', ...extraHeaders }
+            headers: {
+                'User-Agent': 'DarkHorse-Ingest/1.0',
+                'Accept': 'application/xml, application/atom+xml, */*',
+                ...authHeaders
+            }
         });
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status} ${res.statusText} for ${url}`);
-        }
-        return await res.text();
+        const text = await res.text();
+        return {
+            status: res.status,
+            statusText: res.statusText,
+            contentType: res.headers.get('content-type'),
+            text
+        };
     }
     finally {
         clearTimeout(timer);
@@ -395,14 +405,6 @@ async function fetchTextWithTimeout(url, timeoutMs, extraHeaders = {}) {
 function looksLikeEdmx(text) {
     return /<\s*[a-zA-Z0-9_-]*:?(edmx:)?Edmx\b/i.test(text) ||
         /<\s*Schema\b[^>]*\bNamespace=/i.test(text);
-}
-function isOdataServiceLikely(s) {
-    // ContentType heuristic — only services that publish OData have EDMX worth
-    // pulling. Unknown / empty contentType is allowed (catalogs occasionally
-    // omit it); we'd rather attempt and fail than skip.
-    if (!s.contentType)
-        return true;
-    return /odata/i.test(s.contentType);
 }
 function loadCheckpointSeen(checkpointPath) {
     const seen = new Set();

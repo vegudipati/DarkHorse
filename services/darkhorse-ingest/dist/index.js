@@ -46,27 +46,42 @@ function buildFetcher(source) {
 }
 /**
  * EdmxFetcher builder — honours env vars:
- *   - DARKHORSE_API_HUB_EDMX_LIVE=true|1           live download from api.sap.com
- *   - DARKHORSE_API_HUB_EDMX_FILTER=A,B,C          comma-separated service names
- *   - DARKHORSE_API_HUB_EDMX_MAX=N                 limit services per run (0 = unlimited)
- *   - DARKHORSE_API_HUB_EDMX_CHECKPOINT=<path>     resume-from-checkpoint JSONL
- *   - DARKHORSE_API_HUB_EDMX_RATE_MS=N             ms between EDMX downloads (default 500)
+ *   - DARKHORSE_API_HUB_EDMX_LIVE=true|1            live download from api.sap.com
+ *   - DARKHORSE_API_HUB_EDMX_SERVICES=A,B,C         override service-name list
+ *                                                  (default = curated SD/MM/FI/PP set)
+ *   - DARKHORSE_API_HUB_EDMX_MAX=N                  limit services per run (0 = unlimited)
+ *   - DARKHORSE_API_HUB_EDMX_CHECKPOINT=<path>      resume-from-checkpoint JSONL
+ *   - DARKHORSE_API_HUB_EDMX_RATE_MS=N              ms between EDMX downloads (default 500)
+ *   - DARKHORSE_API_HUB_EDMX_DIAGNOSE=true|1        fetch the first service only +
+ *                                                  print full response diagnostics
+ *
+ *  Authentication (api.sap.com gates EDMX behind login). Provide at least one:
+ *   - DARKHORSE_API_HUB_API_KEY=<key>               api.sap.com personal API key
+ *   - DARKHORSE_API_HUB_BEARER=<token>              OAuth2 access token
+ *   - DARKHORSE_API_HUB_COOKIE=<verbatim>           browser-extracted session cookie
  */
 function buildEdmxFetcher() {
     const live = ['1', 'true', 'yes'].includes((process.env.DARKHORSE_API_HUB_EDMX_LIVE ?? '').toLowerCase());
     if (!live) {
         return new SapApiHubEdmxFetcher_1.SapApiHubEdmxFetcher({ live: false });
     }
-    const filterRaw = process.env.DARKHORSE_API_HUB_EDMX_FILTER;
-    const filter = filterRaw ? filterRaw.split(',').map(s => s.trim()).filter(Boolean) : undefined;
+    const servicesRaw = process.env.DARKHORSE_API_HUB_EDMX_SERVICES;
+    const serviceNames = servicesRaw
+        ? servicesRaw.split(',').map(s => s.trim()).filter(Boolean)
+        : undefined;
     const max = parseInt(process.env.DARKHORSE_API_HUB_EDMX_MAX ?? '0', 10);
     const rateMs = parseInt(process.env.DARKHORSE_API_HUB_EDMX_RATE_MS ?? '500', 10);
+    const diagnose = ['1', 'true', 'yes'].includes((process.env.DARKHORSE_API_HUB_EDMX_DIAGNOSE ?? '').toLowerCase());
     return new SapApiHubEdmxFetcher_1.SapApiHubEdmxFetcher({
         live: true,
-        serviceFilter: filter,
+        serviceNames,
         maxServices: isFinite(max) && max > 0 ? max : 0,
         rateLimitMs: isFinite(rateMs) && rateMs >= 0 ? rateMs : 500,
         checkpointPath: process.env.DARKHORSE_API_HUB_EDMX_CHECKPOINT,
+        apiKey: process.env.DARKHORSE_API_HUB_API_KEY,
+        bearerToken: process.env.DARKHORSE_API_HUB_BEARER,
+        cookie: process.env.DARKHORSE_API_HUB_COOKIE,
+        diagnose,
         verbose: true
     });
 }
@@ -388,11 +403,22 @@ Commands:
       Sources: sap-api-hub | sap-api-hub-edmx | clean-core-guide
              | architecture-center | help-portal-cds | all
 
-      sap-api-hub-edmx — bulk field metadata from api.sap.com OData catalog.
-      One EDMX per service yields field schemas for many CDS views at once.
-      No manual URL collection required. Env vars:
+      sap-api-hub-edmx — bulk field metadata from api.sap.com $metadata XML.
+      Walks a curated SD/MM/FI/PP service-name list and downloads each
+      service's $metadata directly (the OData catalog endpoint at
+      api.sap.com/odata/1.0/catalog.svc returns SPA HTML, not real data).
+
+      api.sap.com gates EDMX behind login — provide ONE of these auth vars:
+        DARKHORSE_API_HUB_API_KEY=<key>         personal API key
+        DARKHORSE_API_HUB_BEARER=<token>        OAuth2 bearer
+        DARKHORSE_API_HUB_COOKIE=<cookie>       browser session cookie
+
+      Run env vars:
         DARKHORSE_API_HUB_EDMX_LIVE=true        (default: false → fixture only)
-        DARKHORSE_API_HUB_EDMX_FILTER=A,B,C     comma-separated service names
+        DARKHORSE_API_HUB_EDMX_DIAGNOSE=true    fetch ONE service + print full
+                                                response details (use to iterate
+                                                on auth before scraping all)
+        DARKHORSE_API_HUB_EDMX_SERVICES=A,B,C   override the curated list
         DARKHORSE_API_HUB_EDMX_MAX=N            limit services per run
         DARKHORSE_API_HUB_EDMX_CHECKPOINT=<jsonl-resume-log>
         DARKHORSE_API_HUB_EDMX_RATE_MS=500      ms between downloads
