@@ -20,9 +20,17 @@
  *   and this catalog answers "what fields does this view have?"
  *
  * Storage:
- *   Reads from services/darkhorse-ingest/fixtures/help-portal-cds-seed.json
- *   (HelpPortalFetcher's output fixture). Loaded once on first lookup,
- *   indexed by uppercase view name for O(1) access.
+ *   Reads from TWO fixture files in priority order:
+ *     1. fixtures/help-portal-cds-seed.json        (HelpPortalFetcher output)
+ *     2. fixtures/api-sap-hub-edmx.snapshot.json   (SapApiHubEdmxFetcher output)
+ *   Both files share the same entry shape. The help-portal source wins on
+ *   conflict because its descriptions are typically richer than EDMX
+ *   attribute-derived ones. EDMX coverage is broader (thousands of views
+ *   from one bulk download) but its `description` field carries only
+ *   sap:label / sap:quickinfo annotations from the EDMX, not free text.
+ *
+ *   Loaded once on first lookup, indexed by uppercase view name for O(1)
+ *   access.
  */
 'use strict';
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -63,45 +71,73 @@ class CdsFieldCatalogProvider {
     ensureLoaded() {
         if (this._byName)
             return;
-        const fixturePath = this.options.fixturePath ?? defaultFixturePath();
         const map = new Map();
-        if (!fs.existsSync(fixturePath)) {
-            if (this.options.verbose) {
-                process.stderr.write(`[CdsFieldCatalogProvider] No fixture at ${fixturePath} — operating empty.\n`);
-            }
-            this._byName = map;
-            return;
+        const paths = this.options.fixturePath
+            ? [this.options.fixturePath]
+            : defaultFixturePaths();
+        // Load EDMX FIRST so the help-portal entries overwrite on conflict — help
+        // descriptions tend to be richer free-text vs EDMX sap:label snippets.
+        const edmxPath = paths.find(p => p.endsWith('api-sap-hub-edmx.snapshot.json'));
+        const helpPath = paths.find(p => p.endsWith('help-portal-cds-seed.json')) ?? paths[0];
+        if (edmxPath)
+            this.loadEdmxSnapshot(edmxPath, map);
+        if (helpPath)
+            this.loadHelpPortalSeed(helpPath, map);
+        this._byName = map;
+        if (this.options.verbose) {
+            const withFields = Array.from(map.values()).filter(e => e.fields.length > 0).length;
+            process.stderr.write(`[CdsFieldCatalogProvider] Loaded ${map.size} CDS views ` +
+                `(${withFields} with non-empty field lists) from ${paths.filter(Boolean).join(' + ')}\n`);
         }
+    }
+    loadHelpPortalSeed(filePath, map) {
+        if (!fs.existsSync(filePath))
+            return;
         let parsed;
         try {
-            parsed = JSON.parse(fs.readFileSync(fixturePath, 'utf-8'));
+            parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         }
         catch (err) {
-            process.stderr.write(`[CdsFieldCatalogProvider] Failed to parse ${fixturePath}: ${err?.message ?? err}. Operating empty.\n`);
-            this._byName = map;
+            process.stderr.write(`[CdsFieldCatalogProvider] Failed to parse ${filePath}: ${err?.message ?? err}. Skipping.\n`);
             return;
         }
-        const entries = parsed.entries ?? [];
-        for (const e of entries) {
-            // Skip entries with no actual fields — those add no value to the
-            // grounder. The HelpPortalFetcher leaves stub entries when scraping
-            // fails; we still index them so /health reports them, but only if
-            // fields[] is non-empty do they answer getFields() positively.
+        for (const e of parsed.entries ?? []) {
             if (!e.viewName)
                 continue;
             map.set(e.viewName.trim().toUpperCase(), {
                 viewName: e.viewName,
-                pageTitle: e.title,
+                pageTitle: e.title ?? e.viewName,
                 pageUrl: e.url ?? '',
                 fields: Array.isArray(e.fields) ? e.fields : [],
                 fetchedAt: parsed._metadata?.fetchedAt ?? ''
             });
         }
-        this._byName = map;
-        if (this.options.verbose) {
-            const withFields = Array.from(map.values()).filter(e => e.fields.length > 0).length;
-            process.stderr.write(`[CdsFieldCatalogProvider] Loaded ${map.size} CDS views ` +
-                `(${withFields} with non-empty field lists) from ${fixturePath}\n`);
+    }
+    loadEdmxSnapshot(filePath, map) {
+        if (!fs.existsSync(filePath))
+            return;
+        let parsed;
+        try {
+            parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        }
+        catch (err) {
+            process.stderr.write(`[CdsFieldCatalogProvider] Failed to parse ${filePath}: ${err?.message ?? err}. Skipping.\n`);
+            return;
+        }
+        for (const e of parsed.entries ?? []) {
+            if (!e.viewName)
+                continue;
+            // Don't overwrite an existing help-portal entry — help-portal is loaded
+            // AFTER edmx (see ensureLoaded ordering), so a later help-portal entry
+            // takes precedence by virtue of the simple set order. This branch only
+            // fires when help has no entry for this view.
+            map.set(e.viewName.trim().toUpperCase(), {
+                viewName: e.viewName,
+                pageTitle: `${e.viewName} (${e.serviceName})`,
+                pageUrl: e.edmxUrl ?? '',
+                fields: Array.isArray(e.fields) ? e.fields : [],
+                fetchedAt: e.fetchedAt ?? parsed._metadata?.fetchedAt ?? ''
+            });
         }
     }
 }
@@ -111,11 +147,13 @@ exports.CdsFieldCatalogProvider = CdsFieldCatalogProvider;
 // CloudificationCatalogProvider: prefer an MCP-local copy if one exists,
 // fall back to the canonical ingest fixture location.
 // ---------------------------------------------------------------------------
-function defaultFixturePath() {
-    // __dirname at runtime is dist/src/providers/.
-    const mcpLocal = path.resolve(__dirname, '..', '..', '..', 'data', 'help-portal-cds-seed.json');
-    if (fs.existsSync(mcpLocal))
-        return mcpLocal;
-    return path.resolve(__dirname, '..', '..', '..', '..', 'darkhorse-ingest', 'fixtures', 'help-portal-cds-seed.json');
+function defaultFixturePaths() {
+    // Return both fixture file paths. Caller filters by existence. __dirname at
+    // runtime is dist/src/providers/, so the ingest fixtures are five levels up.
+    const ingestFixtures = path.resolve(__dirname, '..', '..', '..', '..', 'darkhorse-ingest', 'fixtures');
+    return [
+        path.join(ingestFixtures, 'help-portal-cds-seed.json'),
+        path.join(ingestFixtures, 'api-sap-hub-edmx.snapshot.json')
+    ];
 }
 //# sourceMappingURL=CdsFieldCatalogProvider.js.map

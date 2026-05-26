@@ -20,6 +20,7 @@ import path = require('path');
 
 import { Pipeline }                  from './Pipeline';
 import { SapApiHubFetcher }          from './fetchers/SapApiHubFetcher';
+import { SapApiHubEdmxFetcher }      from './fetchers/SapApiHubEdmxFetcher';
 import { CleanCoreGuideFetcher }     from './fetchers/CleanCoreGuideFetcher';
 import { ArchitectureCenterFetcher } from './fetchers/ArchitectureCenterFetcher';
 import { HelpPortalFetcher,
@@ -43,6 +44,7 @@ import {
 
 type SourceKey =
   | 'sap-api-hub'
+  | 'sap-api-hub-edmx'
   | 'clean-core-guide'
   | 'architecture-center'
   | 'help-portal-cds'
@@ -50,6 +52,7 @@ type SourceKey =
 
 const KNOWN_SOURCES: Exclude<SourceKey, 'all'>[] = [
   'sap-api-hub',
+  'sap-api-hub-edmx',
   'clean-core-guide',
   'architecture-center',
   'help-portal-cds'
@@ -58,12 +61,45 @@ const KNOWN_SOURCES: Exclude<SourceKey, 'all'>[] = [
 function buildFetcher(source: Exclude<SourceKey, 'all'>): IFetcher {
   switch (source) {
     case 'sap-api-hub':         return new SapApiHubFetcher({ live: false });
+    case 'sap-api-hub-edmx':    return buildEdmxFetcher();
     case 'clean-core-guide':    return new CleanCoreGuideFetcher({ live: false });
     case 'architecture-center': return new ArchitectureCenterFetcher({ live: false });
     case 'help-portal-cds':     return buildHelpPortalFetcher();
     default:
       throw new Error(`Unknown source "${source}". Known sources: ${KNOWN_SOURCES.join(', ')}`);
   }
+}
+
+/**
+ * EdmxFetcher builder — honours env vars:
+ *   - DARKHORSE_API_HUB_EDMX_LIVE=true|1           live download from api.sap.com
+ *   - DARKHORSE_API_HUB_EDMX_FILTER=A,B,C          comma-separated service names
+ *   - DARKHORSE_API_HUB_EDMX_MAX=N                 limit services per run (0 = unlimited)
+ *   - DARKHORSE_API_HUB_EDMX_CHECKPOINT=<path>     resume-from-checkpoint JSONL
+ *   - DARKHORSE_API_HUB_EDMX_RATE_MS=N             ms between EDMX downloads (default 500)
+ */
+function buildEdmxFetcher(): IFetcher {
+  const live = ['1', 'true', 'yes'].includes(
+    (process.env.DARKHORSE_API_HUB_EDMX_LIVE ?? '').toLowerCase()
+  );
+
+  if (!live) {
+    return new SapApiHubEdmxFetcher({ live: false });
+  }
+
+  const filterRaw = process.env.DARKHORSE_API_HUB_EDMX_FILTER;
+  const filter    = filterRaw ? filterRaw.split(',').map(s => s.trim()).filter(Boolean) : undefined;
+  const max       = parseInt(process.env.DARKHORSE_API_HUB_EDMX_MAX ?? '0', 10);
+  const rateMs    = parseInt(process.env.DARKHORSE_API_HUB_EDMX_RATE_MS ?? '500', 10);
+
+  return new SapApiHubEdmxFetcher({
+    live:           true,
+    serviceFilter:  filter,
+    maxServices:    isFinite(max)    && max    > 0 ? max    : 0,
+    rateLimitMs:    isFinite(rateMs) && rateMs >= 0 ? rateMs : 500,
+    checkpointPath: process.env.DARKHORSE_API_HUB_EDMX_CHECKPOINT,
+    verbose:        true
+  });
 }
 
 /**
@@ -481,8 +517,17 @@ function printHelp(): void {
 Commands:
   ingest <source> [--snapshot <path>]
       Run fetch → chunk → embed → index for <source>.
-      Sources: sap-api-hub | clean-core-guide | architecture-center
-             | help-portal-cds | all
+      Sources: sap-api-hub | sap-api-hub-edmx | clean-core-guide
+             | architecture-center | help-portal-cds | all
+
+      sap-api-hub-edmx — bulk field metadata from api.sap.com OData catalog.
+      One EDMX per service yields field schemas for many CDS views at once.
+      No manual URL collection required. Env vars:
+        DARKHORSE_API_HUB_EDMX_LIVE=true        (default: false → fixture only)
+        DARKHORSE_API_HUB_EDMX_FILTER=A,B,C     comma-separated service names
+        DARKHORSE_API_HUB_EDMX_MAX=N            limit services per run
+        DARKHORSE_API_HUB_EDMX_CHECKPOINT=<jsonl-resume-log>
+        DARKHORSE_API_HUB_EDMX_RATE_MS=500      ms between downloads
       Optional --snapshot writes a JSON snapshot for the verify command
       and later sessions.
 

@@ -20,9 +20,17 @@
  *   and this catalog answers "what fields does this view have?"
  *
  * Storage:
- *   Reads from services/darkhorse-ingest/fixtures/help-portal-cds-seed.json
- *   (HelpPortalFetcher's output fixture). Loaded once on first lookup,
- *   indexed by uppercase view name for O(1) access.
+ *   Reads from TWO fixture files in priority order:
+ *     1. fixtures/help-portal-cds-seed.json        (HelpPortalFetcher output)
+ *     2. fixtures/api-sap-hub-edmx.snapshot.json   (SapApiHubEdmxFetcher output)
+ *   Both files share the same entry shape. The help-portal source wins on
+ *   conflict because its descriptions are typically richer than EDMX
+ *   attribute-derived ones. EDMX coverage is broader (thousands of views
+ *   from one bulk download) but its `description` field carries only
+ *   sap:label / sap:quickinfo annotations from the EDMX, not free text.
+ *
+ *   Loaded once on first lookup, indexed by uppercase view name for O(1)
+ *   access.
  */
 export interface CdsFieldSchema {
     name: string;
@@ -60,5 +68,7 @@ export declare class CdsFieldCatalogProvider {
     /** Number of views with fields[] populated. Used by /health output. */
     size(): number;
     private ensureLoaded;
+    private loadHelpPortalSeed;
+    private loadEdmxSnapshot;
 }
 //# sourceMappingURL=CdsFieldCatalogProvider.d.ts.map
