@@ -5,6 +5,7 @@ import { PipelineStateManager } from './PipelineStateManager';
 let tracker: PipelineTracker;
 let stateManager: PipelineStateManager;
 let statusBarItem: vscode.StatusBarItem;
+let extensionVersion = '';
 
 /** Map a structured RICEFW/RTM intake JSON into BrIntakeData prefill values.
  *  Tolerant of missing fields — anything not present comes through as
@@ -59,17 +60,18 @@ function mapJsonToBrIntake(json: any): {
 /** Refresh the multi-pipeline status bar item (active pipeline name + stage).
  *  Called after any state change so the bar reflects reality. */
 function refreshStatusBar(): void {
+  const v     = extensionVersion ? ` v${extensionVersion}` : '';
   const state = stateManager.getState();
   if (!state) {
-    statusBarItem.text  = '$(circuit-board) DarkHorse: no pipeline';
-    statusBarItem.tooltip = 'Click to start a new pipeline.';
+    statusBarItem.text    = `$(circuit-board) DarkHorse${v}`;
+    statusBarItem.tooltip = `DarkHorse${v}\nClick to start a new pipeline.`;
     statusBarItem.command = 'darkhorse.pipeline.start';
     statusBarItem.show();
     return;
   }
-  const count = stateManager.listPipelines().length;
+  const count  = stateManager.listPipelines().length;
   const suffix = count > 1 ? ` (1 of ${count})` : '';
-  statusBarItem.text  = `$(circuit-board) ${state.title}${suffix}`;
+  statusBarItem.text  = `$(circuit-board) DarkHorse${v}  |  ${state.title}${suffix}`;
   statusBarItem.tooltip =
     `Active pipeline: ${state.title}\n` +
     `Stage: ${stateManager.getStageSummary()}\n` +
@@ -79,6 +81,8 @@ function refreshStatusBar(): void {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+
+  extensionVersion = context.extension.packageJSON?.version ?? '';
 
   // Initialize state manager — persists pipeline across sessions
   stateManager = new PipelineStateManager(context);
