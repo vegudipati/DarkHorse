@@ -120,6 +120,11 @@ export class ObjectCodeGenerator {
       `${objects.filter(o => o.codeAccepted).length} of ${objects.length} objects generated and accepted.`
     );
     tracker.refresh();
+
+    // Back-fill TDS sections (program logic, CDS definitions, BDEF specs, unit
+    // test cases) that could not be written before code existed.
+    const { runTdsPostCodeAgent } = require('./TdsPostCodeAgent');
+    await runTdsPostCodeAgent(stateManager, tracker);
   }
 
   /**
