@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DarkHorse - Target Architecture and Roadmap</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg:#f6f7fb; --card:#fff; --ink:#1b2333; --muted:#5b6578; --line:#d5dae5;
+    --azure:#0f6cbd; --dh:#6b2fa0; --cont:#b07d00; --chick:#2a56a3; --data:#0b7a5a; --ext:#6a6f7a; --edge:#c2410c;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 "Segoe UI",system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:#14213d; color:#fff; padding:22px 32px; }
+  header h1 { margin:0 0 4px; font-size:22px; }
+  header p { margin:0; color:#c9d3ea; }
+  nav { background:#fff; border-bottom:1px solid var(--line); padding:8px 32px; position:sticky; top:0; z-index:5; }
+  nav a { margin-right:18px; color:var(--azure); text-decoration:none; font-weight:600; }
+  main { max-width:1320px; margin:0 auto; padding:24px 32px 60px; }
+  section { margin-bottom:40px; }
+  h2 { font-size:18px; margin:0 0 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; }
+  .grid { display:grid; gap:14px; }
+  .g3 { grid-template-columns:repeat(3,1fr); } .g2 { grid-template-columns:repeat(2,1fr); } .g5 { grid-template-columns:repeat(5,1fr); }
+  .muted { color:var(--muted); }
+  svg text { font-family:"Segoe UI",system-ui,sans-serif; }
+  .legend span { display:inline-flex; align-items:center; margin-right:16px; font-size:12px; color:var(--muted); }
+  .legend i { width:12px; height:12px; border-radius:3px; display:inline-block; margin-right:6px; }
+  .rel h3 { margin:0 0 2px; font-size:15px; } .rel .d { font-weight:600; color:var(--azure); }
+  .rel ul { padding-left:18px; margin:8px 0 0; font-size:12.5px; }
+  .badge { display:inline-block; font-size:11px; padding:1px 8px; border-radius:10px; background:#e8eefc; color:var(--azure); font-weight:600; }
+  .gantt { overflow-x:auto; }
+  .gantt table { border-collapse:collapse; min-width:1150px; width:100%; }
+  .gantt th, .gantt td { border-bottom:1px solid #eceff5; padding:0; font-size:11.5px; }
+  .gantt th.w { width:34px; min-width:34px; text-align:center; color:var(--muted); font-weight:500; padding:3px 0; line-height:1.15; border-left:1px solid #f0f2f7; }
+  .gantt td.n { padding:4px 8px; width:290px; white-space:nowrap; }
+  .gantt td.c { border-left:1px solid #f4f5f9; height:24px; }
+  .gantt tr.grp td { background:#f1f3f9; font-weight:700; padding:4px 8px; }
+  .bar { height:16px; border-radius:4px; margin:4px 0; }
+  .rl { border-left:2px solid #c0392b !important; }
+  table.ms { width:100%; border-collapse:collapse; } table.ms td, table.ms th { text-align:left; padding:6px 8px; border-bottom:1px solid #eceff5; font-size:13px; }
+  .note { font-size:12.5px; }
+  @media (max-width:900px){ .g3,.g2,.g5{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<header>
+  <h1>DarkHorse - Target Architecture and Roadmap</h1>
+  <p>Clean Core compliant SAP code generation on Azure, integrated with Continuum and ChickletFlow. Plan start 26 Oct 2026, GA 9 Apr 2027.</p>
+</header>
+<nav><a href="#arch">Architecture</a><a href="#flow">End-to-end flow</a><a href="#recs">Recommendations</a><a href="#releases">Releases</a><a href="#roadmap">Weekly roadmap</a><a href="#ms">Milestones</a></nav>
+<main>
+
+<section id="arch">
+  <h2>1. Target architecture on Azure</h2>
+  <div class="card">
+    <div class="legend">
+      <span><i style="background:var(--dh)"></i>DarkHorse services</span>
+      <span><i style="background:var(--cont)"></i>Continuum</span>
+      <span><i style="background:var(--chick)"></i>ChickletFlow</span>
+      <span><i style="background:var(--edge)"></i>Edge and identity</span>
+      <span><i style="background:var(--data)"></i>Azure data and AI</span>
+      <span><i style="background:var(--ext)"></i>External sources</span>
+    </div>
+    <svg id="archsvg" viewBox="0 0 1260 740" width="100%" role="img" aria-label="DarkHorse Azure architecture"></svg>
+    <p class="muted note">Existing code: MCP server, ingest framework and fetchers, grounded agents, LLM proxy. New work: everything on the Azure side, the headless agent service, memory, and the Continuum and ChickletFlow integration points.</p>
+  </div>
+</section>
+
+<section id="flow">
+  <h2>2. End-to-end flow</h2>
+  <div class="grid g5">
+    <div class="card"><b>1. Spec approved</b><br><span class="muted">An FDS/TDS version is approved in Continuum. A signed webhook calls the agent service (or a developer pulls the spec from the editor).</span></div>
+    <div class="card"><b>2. Ground</b><br><span class="muted">Agents query the MCP server: hybrid search on AI Search filtered to released APIs, plus memory (past corrections, approved patterns).</span></div>
+    <div class="card"><b>3. Generate</b><br><span class="muted">Code, TDS and SO agents generate through the LLM proxy to Azure OpenAI, with citations to retrieved sources.</span></div>
+    <div class="card"><b>4. Validate</b><br><span class="muted">Clean Core verifier, ReviewAgent and ATC checks run; violations trigger rewrite and retry, and are logged as KB gaps.</span></div>
+    <div class="card"><b>5. Publish</b><br><span class="muted">Artifacts go back to Continuum as a draft version. ChickletFlow moves the chicklet and shows run status and score.</span></div>
+  </div>
+</section>
+
+<section id="recs">
+  <h2>3. Recommendations</h2>
+  <div class="grid g3">
+    <div class="card"><b>Azure, not GCP</b><p class="muted note">The embedder and vector index code is already Azure, clients are Microsoft-heavy, and Azure OpenAI keeps data in the client tenant.</p></div>
+    <div class="card"><b>Managed identity everywhere</b><p class="muted note">Drop AZURE_SEARCH_KEY and API keys. Entra ID for users, managed identity between services, Key Vault for the rest.</p></div>
+    <div class="card"><b>Retrieval quality first</b><p class="muted note">Hybrid search with the semantic ranker, metadata filters, an eval harness that gates every KB change, then close the coverage gaps.</p></div>
+    <div class="card"><b>Memory in two layers</b><p class="muted note">Cosmos DB for session and project state; a second AI Search index for long-term memory (corrections, approved patterns).</p></div>
+    <div class="card"><b>Secure ChickletFlow before exposing it</b><p class="muted note">It has no authentication today. Add Entra and service tokens before any ingress to Azure.</p></div>
+    <div class="card"><b>One event contract</b><p class="muted note">Agree RICEFW ID mapping, run events and statuses across the three products early (week 2-4) and version them.</p></div>
+  </div>
+</section>
+
+<section id="releases">
+  <h2>4. Releases</h2>
+  <div class="grid g5 rel" id="relcards"></div>
+</section>
+
+<section id="roadmap">
+  <h2>5. Weekly roadmap</h2>
+  <div class="card gantt"><div id="gantt"></div>
+    <p class="muted note">Red lines mark release weeks. Key features shown; the full list of 71 features, owners, effort and dependencies is in <code>DarkHorse_Delivery_Plan.xlsx</code>.</p>
+  </div>
+</section>
+
+<section id="ms">
+  <h2>6. Milestones</h2>
+  <div class="card"><table class="ms" id="mstable"></table></div>
+</section>
+
+</main>
+
+<script>
+/* ---------- Architecture diagram ---------- */
+const C = { dh:'#6b2fa0', cont:'#b07d00', chick:'#2a56a3', data:'#0b7a5a', ext:'#6a6f7a', edge:'#c2410c', azure:'#0f6cbd' };
+const svg = document.getElementById('archsvg');
+const NS = 'http://www.w3.org/2000/svg';
+function el(n, a, t) { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); if (t) e.textContent = t; svg.appendChild(e); return e; }
+svg.innerHTML = '<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4a5568"/></marker></defs>';
+function box(x, y, w, h, color, title, sub, opt = {}) {
+  el('rect', { x, y, width:w, height:h, rx:8, fill: opt.fill || '#fff', stroke: color, 'stroke-width': opt.dash ? 1.5 : 2, 'stroke-dasharray': opt.dash ? '6 4' : '' });
+  if (opt.head) el('rect', { x, y, width:w, height:22, rx:8, fill: color });
+  if (opt.head) el('rect', { x, y:y + 12, width:w, height:10, fill: color });
+  const ty = opt.head ? y + 16 : y + 22;
+  el('text', { x: opt.left ? x + 10 : x + w/2, y: ty, 'text-anchor': opt.left ? 'start' : 'middle', 'font-size':13, 'font-weight':700, fill: opt.head ? '#fff' : color }, title);
+  (sub || []).forEach((s, i) => el('text', { x: x + w/2, y: ty + 18 + i*15, 'text-anchor':'middle', 'font-size':11.5, fill:'#3b4558' }, s));
+}
+function line(pts, opt = {}) {
+  el('polyline', { points: pts.map(p => p.join(',')).join(' '), fill:'none', stroke: opt.color || '#4a5568', 'stroke-width':1.6, 'stroke-dasharray': opt.dash ? '5 4' : '',
+    'marker-end': 'url(#ah)', 'marker-start': opt.both ? 'url(#ah)' : '' });
+}
+function label(x, y, t, anchor = 'start') { el('text', { x, y, 'font-size':10.5, fill:'#4a5568', 'text-anchor': anchor, 'font-style':'italic' }, t); }
+
+// Apps row
+box(40, 20, 330, 74, C.dh, 'DarkHorse Editor', ['VS Code fork + extensions (pipeline, agents, abap, sap)', 'Entra sign-in; endpoint set per client']);
+box(455, 20, 330, 74, C.cont, 'Continuum', ['RICEFW spec portal (Next.js + Prisma)', 'Container Apps + Postgres Flexible, Entra SSO']);
+box(870, 20, 330, 74, C.chick, 'ChickletFlow', ['Delivery board (FastAPI + React + WebSocket)', 'Container Apps + Postgres Flexible, Entra auth']);
+// Edge
+box(40, 130, 900, 56, C.edge, 'Azure Front Door  >  API Management', ['JWT validation, rate limits, audit log, routing to internal Container Apps'], {});
+box(980, 130, 220, 56, C.edge, 'Microsoft Entra ID', ['users, groups, managed identities']);
+line([[205,94],[205,130]], { both:true });
+line([[620,94],[620,130]], { both:true });
+line([[1035,94],[1035,130]], { both:true });
+label(630, 114, 'approval webhook / spec read / push-back');
+label(1045, 114, 'run events / status');
+line([[940,158],[980,158]], { both:true, dash:true });
+
+// Compute container
+box(40, 226, 1160, 200, C.azure, 'Azure Container Apps environment (internal ingress, scale rules, managed identity)', [], { head:true, left:true, fill:'#f5f9ff' });
+box(60, 270, 260, 108, C.dh, 'Agent service  [NEW]', ['Headless pipeline: FDS, TDS, SO, Code,', 'Review, TdsPostCode, architecture diagram', 'Run API: start / status / cancel']);
+box(340, 270, 260, 108, C.dh, 'MCP server  [HTTP + auth]', ['verify_badi / exit, clean core level,', 'CDS, EML, RAP, CBO, released API,', 'ATC check, search / save memory']);
+box(620, 270, 260, 108, C.dh, 'LLM proxy', ['Adapter: Azure OpenAI / Claude on', 'Foundry / Ollama. PII + secret scrubbing,', 'token metering, retries']);
+box(900, 270, 280, 108, C.dh, 'Ingest job  (scheduled)', ['Fetchers > chunker > embedder > index', 'API Hub, Clean Core Guide, Arch Center,', 'Help Portal; EDMX; nightly / weekly']);
+line([[190,186],[190,270]]); line([[470,186],[470,270]]); line([[750,186],[750,270]]);
+line([[320,324],[340,324]]);
+label(322, 316, 'ground', 'middle');
+line([[190,378],[190,404],[750,404],[750,378]], { dash:true });
+label(470, 399, 'generate through proxy', 'middle');
+
+// Data row
+box(60, 470, 240, 86, C.data, 'Cosmos DB', ['Memory: sessions, project context,', 'run history']);
+box(340, 470, 260, 86, C.data, 'Azure AI Search', ['Hybrid vector + keyword, semantic ranker', 'KB index v2 + long-term memory index']);
+box(640, 470, 240, 86, C.data, 'Azure OpenAI / Foundry', ['Chat model + text-embedding-3', 'Data stays in the tenant']);
+box(920, 470, 260, 86, C.data, 'Blob Storage', ['Raw SAP docs, Clean Core PDFs,', 'generated artifacts, ingest versions']);
+line([[190,378],[190,470]]);
+line([[470,378],[470,470]]);
+line([[750,378],[750,470]]);
+line([[1060,378],[1060,470]]);
+line([[960,378],[960,420],[560,420],[560,470]], { dash:true });
+line([[1000,378],[1000,440],[840,440],[840,470]], { dash:true });
+label(780, 436, 'embed', 'middle'); label(700, 416, 'index', 'middle');
+
+// Platform band
+box(40, 580, 1160, 40, C.azure, '', [], { fill:'#f5f9ff', dash:true });
+el('text', { x:620, y:605, 'text-anchor':'middle', 'font-size':12, fill:'#3b4558' }, 'Key Vault  |  Managed identity (no keys)  |  App Insights + Log Analytics  |  Budgets and token metering  |  Private Endpoints (R3)  |  GitHub Actions CI/CD + Bicep');
+
+// External sources
+box(40, 636, 1160, 92, C.ext, 'External knowledge sources', [], { head:true, left:true, fill:'#fafafa' });
+[['SAP Business Accelerator Hub','catalog, search, EDMX'],['Clean Core Guide','PDF'],['SAP Architecture Center','puppeteer crawl'],['SAP Help Portal','CDS / ABAP docs']].forEach((s, i) =>
+  box(60 + i*285, 668, 265, 50, C.ext, s[0], [s[1]]));
+line([[1200,692],[1230,692],[1230,324],[1180,324]], { dash:true });
+label(1236, 500, 'scheduled fetch', 'start');
+</script>
+
+<script>
+/* ---------- Roadmap data ---------- */
+const START = new Date(Date.UTC(2026, 9, 26)), NW = 26;
+const fmt = d => d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', timeZone:'UTC' });
+const wkStart = w => new Date(START.getTime() + 7*(w-1)*86400000);
+const wkFri = w => new Date(START.getTime() + (7*(w-1)+4)*86400000);
+const REL = { R0:4, MVP:8, R2:14, R3:20, GA:24 };
+const WS = [
+  ['Azure Platform', C.azure, [['Landing zone + IaC',1,3],['OpenAI + AI Search',1,4],['Containers + CI/CD',3,4],['APIM, Front Door, Entra',4,7],['Prod env + go-live',7,8],['Private networking',16,20],['Client-tenant template, DR',20,24]]],
+  ['RAG and MCP', C.data, [['MCP HTTP transport + auth',3,5],['Ingest job + index v2',5,8],['Retrieval eval harness',6,8],['EDMX, help-portal re-crawl',9,13],['KB gap closure',11,14],['New MCP tools',12,14]]],
+  ['Agents and memory', C.dh, [['LLM proxy on Azure',4,7],['Headless agent service',9,14],['Clean Core validation loop',9,13],['Cosmos + memory API',8,13],['Correction store indexed',11,14],['Agent marketplace',15,20],['Multi-model routing',14,17],['Pattern library + governance',15,19]]],
+  ['Editor', '#00899b', [['Entra sign-in + endpoint config',5,8],['Installer + update channel',11,14],['Telemetry dashboard',16,18]]],
+  ['Continuum', C.cont, [['Service-token API + OpenAPI',3,6],['DarkHorse pulls specs',5,8],['Azure + Entra SSO',7,11],['Schema + push-back',9,12],['Approval webhook',11,14],['Generate with DarkHorse UI',14,18]]],
+  ['ChickletFlow', C.chick, [['Auth (Entra + tokens)',6,9],['Azure deployment',8,11],['Link fields + events API',8,12],['StatusReporter + mapping',11,14],['Run badge + dashboard',15,19]]],
+  ['Cross-product', '#6a6f7a', [['Event and ID contract',2,4],['Internal pilot (1 RICEFW)',7,8],['End-to-end UAT',18,20],['Program pilot',21,23],['Security review + pen-test',21,23],['GA readiness',23,24]]],
+];
+const MS = [
+  [1,'M0 Kickoff','Plan approved, Azure subscription and quota requests opened'],
+  [4,'M1 Azure dev live (R0)','IaC deployed, containers in ACR, CI/CD green, OpenAI + AI Search provisioned'],
+  [4,'M2 Integration contract signed','Event/ID contract agreed by the three products'],
+  [7,'M3 MVP feature complete','Editor > APIM > MCP / LLM proxy > AI Search with Entra auth and Continuum read'],
+  [8,'M4 MVP go-live on Azure','Prod env up, one real RICEFW end to end, go/no-go passed'],
+  [10,'M5 Hypercare exit','Stable two weeks across the holiday period'],
+  [11,'M6 Continuum + ChickletFlow on Azure','Both deployed with Entra SSO and API auth'],
+  [14,'M7 R2 integrated release','Memory, Clean Core loop, push-back, webhook, StatusReporter'],
+  [20,'M8 R3 release','Marketplace, multi-model, dashboards, UAT complete'],
+  [22,'M9 Security sign-off','Pen-test findings closed, DR test passed'],
+  [24,'M10 GA','Production release, client-tenant template, support model'],
+];
+const RELINFO = {
+  R0:['Azure Foundations','Azure dev environment, IaC, CI/CD, OpenAI + AI Search, contract drafted'],
+  MVP:['MVP on Azure','Entra auth, MCP + RAG on AI Search, LLM proxy, editor on Azure, Continuum read, internal pilot'],
+  R2:['Integrated release','Memory, Clean Core validation loop, headless agents, Continuum push-back + webhook, ChickletFlow status sync, both apps on Azure'],
+  R3:['Scale and marketplace','Agent marketplace, multi-model, private networking, run badges and dashboards, end-to-end UAT'],
+  GA:['General availability','Pen-test closed, DR tested, client-tenant template, docs and training'],
+};
+const NF = { R0:7, MVP:16, R2:24, R3:11, GA:6 };
+
+document.getElementById('relcards').innerHTML = Object.keys(REL).map(k =>
+  `<div class="card rel"><span class="badge">${k}</span><h3>${RELINFO[k][0]}</h3><div class="d">${fmt(wkFri(REL[k]))} ${wkFri(REL[k]).getUTCFullYear()} (week ${REL[k]})</div><div class="muted note">${NF[k]} features</div><ul><li>${RELINFO[k][1].split(', ').join('</li><li>')}</li></ul></div>`).join('');
+
+let g = '<table><tr><th style="text-align:left;padding:4px 8px">Workstream / feature</th>';
+for (let w = 1; w <= NW; w++) {
+  const rl = Object.values(REL).includes(w) ? ' rl' : '';
+  g += `<th class="w${rl}">${w}<br>${w % 2 ? fmt(wkStart(w)).replace(' ', '<br>') : ''}</th>`;
+}
+g += '</tr>';
+for (const [name, color, items] of WS) {
+  g += `<tr class="grp"><td colspan="${NW+1}" style="border-left:5px solid ${color}">${name}</td></tr>`;
+  for (const [t, s, e] of items) {
+    g += `<tr><td class="n">${t}</td>`;
+    for (let w = 1; w <= NW; w++) {
+      const rl = Object.values(REL).includes(w) ? ' rl' : '';
+      const on = w >= s && w <= e;
+      const r = on ? `border-radius:${w===s?'4px':'0'} ${w===e?'4px 4px':'0 0'} ${w===s?'4px':'0'};` : '';
+      g += `<td class="c${rl}">${on ? `<div class="bar" title="${t}: W${s}-W${e} (${fmt(wkStart(s))} to ${fmt(wkFri(e))})" style="background:${color};${r}"></div>` : ''}</td>`;
+    }
+    g += '</tr>';
+  }
+}
+g += `<tr class="grp"><td>Releases</td>${Array.from({length:NW}, (_, i) => { const w = i+1; const k = Object.keys(REL).find(x => REL[x] === w); return `<td class="c${k?' rl':''}" style="text-align:center;font-weight:700;color:#c0392b">${k||''}</td>`; }).join('')}</tr>`;
+g += '</table>';
+document.getElementById('gantt').innerHTML = g;
+
+document.getElementById('mstable').innerHTML = '<tr><th>Milestone</th><th>Week</th><th>Date</th><th>Exit criteria</th></tr>' +
+  MS.map(([w, n, c]) => `<tr><td><b>${n}</b></td><td>${w}</td><td>${fmt(wkFri(w))} ${wkFri(w).getUTCFullYear()}</td><td class="muted">${c}</td></tr>`).join('');
+</script>
+</body>
+</html>
